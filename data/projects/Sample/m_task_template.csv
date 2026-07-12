@@ -1,0 +1,5 @@
+template_id,section_id,task_name,default_days
+T_001,S_001,ラフ制作,5
+T_002,S_001,線画制作,3
+T_003,S_002,骨組み作成,3
+T_004,S_002,アニメーション付け,7

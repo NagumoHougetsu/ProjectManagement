@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マスタデータ管理エディタ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .tab-btn.active { border-bottom: 2px solid #3b82f6; color: #3b82f6; }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex flex-col">
+    <header class="bg-gray-800 text-white p-4 flex justify-between items-center shadow-md">
+        <h1 class="text-xl font-bold">マスタデータ管理エディタ</h1>
+        <button id="btn-save-masters" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded font-bold shadow transition">全マスタ保存</button>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <div class="w-48 bg-white border-r flex flex-col">
+            <button class="tab-btn active p-4 text-left hover:bg-gray-50 font-bold" data-target="release">リリース</button>
+            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="character">キャラクター</button>
+            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="section">セクション</button>
+            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="member">メンバー</button>
+            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="task_template">タスク雛形</button>
+            <button class="tab-btn p-4 text-left hover:bg-gray-50 font-bold" data-target="holiday">休日</button>
+        </div>
+        <div class="flex-1 p-4 overflow-auto bg-white" id="editor-container">
+            <!-- Table dynamically injected here -->
+        </div>
+    </div>
+
+    <script>
+        let mastersData = {};
+        const schemas = {
+            release: ['release_id', 'release_name', 'art_deadline', 'event_name'],
+            character: ['char_id', 'char_name', 'costume_name', 'category', 'usage', 'event_id'],
+            section: ['section_id', 'section_name', 'color'],
+            member: ['member_id', 'member_name', 'section_id', 'color'],
+            task_template: ['template_id', 'section_id', 'task_name', 'default_days'],
+            holiday: ['holiday_date', 'holiday_name', 'holiday_type']
+        };
+
+        let currentTab = 'release';
+        
+        // get project name from query param
+        const urlParams = new URLSearchParams(window.location.search);
+        const projectName = urlParams.get('project') || 'Sample';
+
+        async function loadMasters() {
+            const res = await fetch(`/api/masters?project=${projectName}`);
+            mastersData = await res.json();
+            renderTable();
+        }
+
+        function renderTable() {
+            const container = document.getElementById('editor-container');
+            container.innerHTML = '';
+            
+            const schema = schemas[currentTab];
+            const data = mastersData[currentTab] || [];
+
+            const table = document.createElement('table');
+            table.className = 'min-w-full bg-white border';
+            
+            // Header
+            const thead = document.createElement('thead');
+            const trHead = document.createElement('tr');
+            schema.forEach(col => {
+                const th = document.createElement('th');
+                th.className = 'py-2 px-4 border-b bg-gray-100 text-left text-sm font-bold text-gray-600';
+                th.textContent = col;
+                trHead.appendChild(th);
+            });
+            const thAction = document.createElement('th');
+            thAction.className = 'py-2 px-4 border-b bg-gray-100 text-left';
+            thAction.textContent = '操作';
+            trHead.appendChild(thAction);
+            thead.appendChild(trHead);
+            table.appendChild(thead);
+
+            // Body
+            const tbody = document.createElement('tbody');
+            data.forEach((row, index) => {
+                const tr = document.createElement('tr');
+                schema.forEach(col => {
+                    const td = document.createElement('td');
+                    td.className = 'py-1 px-2 border-b';
+                    const input = document.createElement('input');
+                    input.type = col.includes('color') ? 'color' : 'text';
+                    input.value = row[col] || '';
+                    input.className = 'w-full border p-1 rounded';
+                    input.onchange = (e) => {
+                        mastersData[currentTab][index][col] = e.target.value;
+                    };
+                    td.appendChild(input);
+                    tr.appendChild(td);
+                });
+                
+                const tdAction = document.createElement('td');
+                tdAction.className = 'py-1 px-2 border-b';
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '削除';
+                delBtn.className = 'bg-red-500 text-white px-2 py-1 rounded text-xs';
+                delBtn.onclick = () => {
+                    mastersData[currentTab].splice(index, 1);
+                    renderTable();
+                };
+                tdAction.appendChild(delBtn);
+                tr.appendChild(tdAction);
+
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            container.appendChild(table);
+
+            const addBtn = document.createElement('button');
+            addBtn.textContent = '+ 行を追加';
+            addBtn.className = 'mt-4 bg-blue-500 text-white px-4 py-2 rounded';
+            addBtn.onclick = () => {
+                const newRow = {};
+                schema.forEach(col => newRow[col] = '');
+                mastersData[currentTab].push(newRow);
+                renderTable();
+            };
+            container.appendChild(addBtn);
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                currentTab = e.target.dataset.target;
+                renderTable();
+            });
+        });
+
+        document.getElementById('btn-save-masters').addEventListener('click', async () => {
+            try {
+                const res = await fetch(`/api/masters/save?project=${projectName}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(mastersData)
+                });
+                const result = await res.json();
+                if(result.status === 'success') {
+                    alert('マスタデータを保存しました。');
+                } else {
+                    alert('保存に失敗しました: ' + result.message);
+                }
+            } catch (err) {
+                alert('エラーが発生しました');
+            }
+        });
+
+        loadMasters();
+    </script>
+</body>
+</html>

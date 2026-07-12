@@ -1,0 +1,2 @@
+# data folder is managed by SVN, so exclude from Git except the folder itself
+data/*.csv
