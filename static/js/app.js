@@ -27,6 +27,13 @@ let historyStack = [];
 let redoStack = [];
 let isUndoRedoAction = false;
 
+// Copy/Paste State
+let copiedTaskRaw = null;
+let lastContextGroup = null;
+let lastContextTime = null;
+let lastMouseGroup = null;
+let lastMouseTime = null;
+
 // DOM Elements
 const panel = document.getElementById('side-panel');
 const unsavedBadge = document.getElementById('unsaved-badge');
@@ -75,6 +82,18 @@ async function reloadData() {
 async function fetchMasters() {
     const res = await fetch(`/api/masters?project=${currentProject}`);
     masters = await res.json();
+    
+    if (masters.section) {
+        const filterSel = document.getElementById('filter-section');
+        if (filterSel) {
+            const currentVal = filterSel.value;
+            filterSel.innerHTML = '<option value="">全セクション表示</option>' +
+                masters.section.map(s => `<option value="${s.section_id}">${s.section_name}</option>`).join('');
+            if (Array.from(filterSel.options).some(o => o.value === currentVal)) {
+                filterSel.value = currentVal;
+            }
+        }
+    }
 }
 
 async function fetchTasks() {
@@ -94,12 +113,30 @@ async function fetchTasks() {
             // 終了時間は 翌日 00:00:00 にする。ミリ秒単位の端数はVis.jsの計算を狂わせる。
             end: moment(t.end_date).add(1, 'days').toDate(),
             content: renderItemContent(t),
+            title: generateTaskTooltip(t), // ツールチップ用のHTMLを追加
             className: parseInt(t.progress) === 100 ? 'completed' : '',
             raw: t
         };
     });
     // 重複IDエラーでクラッシュするのを防ぐため、addではなくupdateを使用する
     items.update(parsedItems);
+}
+
+function generateTaskTooltip(task) {
+    const section = getMasterItem('section', 'section_id', task.section_id);
+    const member = getMasterItem('member', 'member_id', task.member_id);
+    const memberName = member ? member.member_name : '未定';
+    const sectionName = section ? section.section_name : '未定';
+
+    return `
+        <div style="padding: 4px; font-size: 12px; line-height: 1.5;">
+            <div style="font-weight: bold; margin-bottom: 4px; border-bottom: 1px solid #ccc; padding-bottom: 2px;">${task.task_name}</div>
+            <div>セクション: ${sectionName}</div>
+            <div>担当者: ${memberName}</div>
+            <div>期間: ${task.start_date} 〜 ${task.end_date}</div>
+            <div>進捗: ${task.progress}%</div>
+        </div>
+    `;
 }
 
 function getMasterItem(type, idField, id) {
@@ -194,16 +231,20 @@ function drawHolidaysDirectly() {
     
     // Vis.jsの一番奥底の背景パネル要素を取得
     const backgroundPanel = document.querySelector('.vis-panel.vis-background');
-    if (!backgroundPanel) return;
+    const centerPanel = document.querySelector('.vis-panel.vis-center'); // テキスト配置用
+    if (!backgroundPanel || !centerPanel) return;
 
     // 前回のカスタム背景をクリア
-    const oldBgs = backgroundPanel.querySelectorAll('.custom-holiday-bg');
-    oldBgs.forEach(el => el.remove());
+    backgroundPanel.querySelectorAll('.custom-holiday-bg').forEach(el => el.remove());
+    centerPanel.querySelectorAll('.custom-holiday-bg').forEach(el => el.remove());
 
     // 現在の画面表示範囲を取得し、少し広めに描画する
     const win = timeline.getWindow();
     const start = moment(win.start).subtract(3, 'days').startOf('day');
     const end = moment(win.end).add(3, 'days').startOf('day');
+
+    const filterSectionId = document.getElementById('filter-section') ? document.getElementById('filter-section').value : '';
+    const allTasks = items.get({ filter: item => item.raw });
 
     for (let m = moment(start); m.isBefore(end); m.add(1, 'days')) {
         const dateStr = m.format('YYYY-MM-DD');
@@ -259,6 +300,60 @@ function drawHolidaysDirectly() {
             }
 
             backgroundPanel.appendChild(div);
+        }
+
+        // 稼働Line数の計算と表示
+        let activeLineCount = 0;
+        const currentDay = m.clone().startOf('day');
+        allTasks.forEach(task => {
+            const raw = task.raw;
+            if (filterSectionId && raw.section_id !== filterSectionId) return;
+            const taskStart = moment(task.start).startOf('day');
+            if (currentDay.isSameOrAfter(taskStart) && currentDay.isBefore(moment(task.end))) {
+                activeLineCount++;
+            }
+        });
+
+        if (activeLineCount > 0 && !isHoliday) {
+            // ヒートマップ色の決定（数が多くなるほど赤くなる）
+            let heatColor = 'rgba(255, 255, 255, 0.8)';
+            let textColor = '#333';
+            
+            if (activeLineCount >= 5) {
+                heatColor = 'rgba(239, 68, 68, 0.8)'; // Tailwindのred-500
+                textColor = '#fff';
+            } else if (activeLineCount >= 3) {
+                heatColor = 'rgba(245, 158, 11, 0.8)'; // Tailwindのamber-500 (オレンジ)
+            } else if (activeLineCount >= 1) {
+                heatColor = 'rgba(134, 239, 172, 0.8)'; // Tailwindのgreen-300
+            }
+            
+            // セクションフィルタされている場合は青ベースのヒートマップにするなどの工夫も可能だが
+            // シンプルに一律でヒートマップカラーにする
+            if (filterSectionId) {
+                heatColor = 'rgba(96, 165, 250, 0.8)'; // フィルタ中は青色でハイライト
+                textColor = '#fff';
+            }
+
+            // 平日のみ日付の下（タスク領域の一番上）にLine数を表示し、背景色をインジケーターとする
+            const textDiv = document.createElement('div');
+            textDiv.className = 'custom-holiday-bg';
+            textDiv.style.position = 'absolute';
+            textDiv.style.top = '0';
+            textDiv.style.left = leftX + 'px';
+            textDiv.style.width = width + 'px';
+            textDiv.style.height = '16px';
+            textDiv.style.lineHeight = '16px';
+            textDiv.style.textAlign = 'center';
+            textDiv.style.fontSize = '10px';
+            textDiv.style.fontWeight = 'bold';
+            textDiv.style.color = textColor;
+            textDiv.style.backgroundColor = heatColor;
+            textDiv.style.borderBottom = '1px solid #ddd';
+            textDiv.style.borderRight = '1px solid #eee';
+            textDiv.style.zIndex = '5';
+            textDiv.innerText = activeLineCount;
+            centerPanel.appendChild(textDiv);
         }
 
         // 月の境目の垂直線（太い罫線）: その月の1日の開始位置
@@ -415,9 +510,9 @@ function initTimeline() {
         margin: {
             item: {
                 horizontal: 0,
-                vertical: -2 /* マイナス値を設定して強制的に余白を詰める */
+                vertical: 0
             },
-            axis: 0
+            axis: 16 // Line数表示用のスペースを上部に16px確保
         },
         snap: function (date, scale, step) {
             // ドラッグやリサイズ時に0:00固定にする
@@ -533,14 +628,35 @@ function initTimeline() {
         }
     });
 
+    // マウス位置を常に追跡してCTRL+Vでのペースト先を決める
+    container.addEventListener('mousemove', (e) => {
+        const props = timeline.getEventProperties(e);
+        if (props && props.group && props.time) {
+            lastMouseGroup = props.group;
+            lastMouseTime = props.time;
+        }
+    });
+
     timeline.on('contextmenu', function (props) {
         props.event.preventDefault();
+        
+        // 常に右クリック位置のグループと時間を保存しておく（ペースト用）
+        if (props.group && props.time) {
+            lastContextGroup = props.group;
+            lastContextTime = props.time;
+        }
+        
         if (props.item) {
             currentTaskContextId = props.item;
-            contextMenu.style.left = props.event.pageX + 'px';
-            contextMenu.style.top = props.event.pageY + 'px';
-            contextMenu.classList.remove('hidden');
+        } else {
+            currentTaskContextId = null;
         }
+        
+        // ペーストはアイテムがなくても可能。コピーや進捗変更はアイテムがある時のみ可能にするが
+        // メニューは表示して中で判定・無効化する方が良い
+        contextMenu.style.left = props.event.pageX + 'px';
+        contextMenu.style.top = props.event.pageY + 'px';
+        contextMenu.classList.remove('hidden');
     });
 
     timeline.on('itemUpdated', function (item) {
@@ -699,6 +815,13 @@ function populateDropdowns() {
 }
 
 function setupEventListeners() {
+    const filterSectionEl = document.getElementById('filter-section');
+    if (filterSectionEl) {
+        filterSectionEl.addEventListener('change', () => {
+            drawHolidaysDirectly();
+        });
+    }
+
     document.getElementById('project-select').addEventListener('change', async (e) => {
         if (hasUnsavedChanges) {
             if (!confirm('未保存の変更がありますが、プロジェクトを切り替えますか？')) {
@@ -749,12 +872,125 @@ function setupEventListeners() {
     document.getElementById('btn-redo').addEventListener('click', performRedo);
 
     document.addEventListener('keydown', (e) => {
+        // Ctrl+Z, Ctrl+Y
         if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'z') {
             performUndo();
         } else if (e.ctrlKey && (e.shiftKey && e.key.toLowerCase() === 'z' || e.key.toLowerCase() === 'y')) {
             performRedo();
         }
+        // Ctrl+C
+        else if (e.ctrlKey && e.key.toLowerCase() === 'c') {
+            // 現在選択されているアイテムをコピー
+            const selectedIds = timeline.getSelection();
+            if (selectedIds && selectedIds.length > 0) {
+                const item = items.get(selectedIds[0]);
+                if (item && !item.isParentBar && item.raw) {
+                    copiedTaskRaw = JSON.parse(JSON.stringify(item.raw));
+                    serverLog('DEBUG', "Copied: " + copiedTaskRaw.task_name);
+                }
+            }
+        }
+        // Ctrl+V
+        else if (e.ctrlKey && e.key.toLowerCase() === 'v') {
+            if (copiedTaskRaw && lastMouseGroup && lastMouseTime) {
+                pasteTask(lastMouseGroup, lastMouseTime);
+            }
+        }
+        // Delete
+        else if (e.key === 'Delete') {
+            const selectedIds = timeline.getSelection();
+            if (selectedIds && selectedIds.length > 0) {
+                const item = items.get(selectedIds[0]);
+                if (item && !item.isParentBar && item.raw) {
+                    if (confirm('選択中のタスクを削除しますか？')) {
+                        saveHistory();
+                        items.remove(item.id);
+                        updateParentBars();
+                        markUnsaved();
+                        panel.classList.add('translate-x-full');
+                    }
+                }
+            }
+        }
     });
+
+    document.getElementById('ctx-copy').addEventListener('click', () => {
+        if (currentTaskContextId) {
+            const item = items.get(currentTaskContextId);
+            if (item && !item.isParentBar && item.raw) {
+                copiedTaskRaw = JSON.parse(JSON.stringify(item.raw));
+                serverLog('DEBUG', "Copied from context: " + copiedTaskRaw.task_name);
+            }
+        }
+        contextMenu.classList.add('hidden');
+    });
+
+    document.getElementById('ctx-paste').addEventListener('click', () => {
+        if (copiedTaskRaw && lastContextGroup && lastContextTime) {
+            pasteTask(lastContextGroup, lastContextTime);
+        }
+        contextMenu.classList.add('hidden');
+    });
+
+    document.getElementById('ctx-delete').addEventListener('click', () => {
+        if (currentTaskContextId) {
+            const item = items.get(currentTaskContextId);
+            if (item && !item.isParentBar && item.raw) {
+                if (confirm('選択中のタスクを削除しますか？')) {
+                    saveHistory();
+                    items.remove(item.id);
+                    updateParentBars();
+                    markUnsaved();
+                    panel.classList.add('translate-x-full');
+                }
+            }
+        }
+        contextMenu.classList.add('hidden');
+    });
+
+    function pasteTask(targetGroup, targetTime) {
+        if (!copiedTaskRaw) return;
+        
+        saveHistory();
+        
+        const newRaw = JSON.parse(JSON.stringify(copiedTaskRaw));
+        // IDは新規発行
+        newRaw.task_id = 'TSK_' + Date.now();
+        
+        // グループ文字列から release, char, lane を抽出
+        // e.g. R_001_C_001_LANE1
+        const parts = targetGroup.split('_');
+        if (parts.length >= 5) {
+            newRaw.release_id = parts[0] + '_' + parts[1];
+            newRaw.char_id = parts[2] + '_' + parts[3];
+            newRaw.lane = parts[4].replace('LANE', '');
+        }
+        
+        // 期間の計算
+        const oldStart = moment(copiedTaskRaw.start_date);
+        const oldEnd = moment(copiedTaskRaw.end_date);
+        const durationDays = oldEnd.diff(oldStart, 'days');
+        
+        // ペースト先の日付（スナップされたもの）
+        const newStart = moment(targetTime).startOf('day');
+        newRaw.start_date = newStart.format('YYYY-MM-DD');
+        newRaw.end_date = newStart.clone().add(durationDays, 'days').format('YYYY-MM-DD');
+        
+        const item = {
+            id: newRaw.task_id,
+            group: targetGroup,
+            start: moment(newRaw.start_date).toDate(),
+            end: moment(newRaw.end_date).add(1, 'days').subtract(1, 'milliseconds').toDate(),
+            content: renderItemContent(newRaw),
+            title: generateTaskTooltip(newRaw),
+            className: parseInt(newRaw.progress) === 100 ? 'completed' : '',
+            raw: newRaw
+        };
+        
+        items.add(item);
+        updateParentBars();
+        markUnsaved();
+    }
 
     document.getElementById('btn-apply-task').addEventListener('click', () => {
         saveHistory();
@@ -780,6 +1016,7 @@ function setupEventListeners() {
             // Vis.js描画用に+1日して1ミリ秒引く
             end: moment(raw.end_date).add(1, 'days').subtract(1, 'milliseconds').toDate(),
             content: renderItemContent(raw),
+            title: generateTaskTooltip(raw),
             className: parseInt(raw.progress) === 100 ? 'completed' : '',
             raw: raw
         };
@@ -814,6 +1051,7 @@ function setupEventListeners() {
                 const item = items.get(currentTaskContextId);
                 item.raw.progress = prog;
                 item.content = renderItemContent(item.raw);
+                item.title = generateTaskTooltip(item.raw);
                 item.className = parseInt(prog) === 100 ? 'completed' : '';
                 items.update(item);
                 markUnsaved();

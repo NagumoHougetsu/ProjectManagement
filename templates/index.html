@@ -20,6 +20,12 @@
         <div class="flex items-center space-x-4">
             <h1 class="text-xl font-bold">次世代アートWBSツール (最新版 v10)</h1>
             <select id="project-select" class="text-black px-2 py-1 rounded border"></select>
+            <div class="flex items-center space-x-2 ml-4">
+                <label for="filter-section" class="text-sm font-bold">稼働Line表示:</label>
+                <select id="filter-section" class="text-black px-2 py-1 rounded border">
+                    <option value="">全セクション表示</option>
+                </select>
+            </div>
         </div>
         <div class="flex space-x-4">
             <span id="unsaved-badge" class="bg-red-500 text-white px-3 py-1 rounded hidden font-bold mt-1">未保存の変更あり</span>
@@ -92,13 +98,25 @@
         </div>
         
         <!-- Context Menu -->
-        <div id="context-menu" class="absolute bg-white border shadow-lg rounded hidden z-50 py-1">
-            <div class="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm font-bold text-gray-700 border-b pointer-events-none">進捗変更</div>
-            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="0">0% (未着手)</div>
-            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="25">25%</div>
-            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="50">50%</div>
-            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="75">75%</div>
-            <div class="px-4 py-2 hover:bg-green-100 cursor-pointer text-sm context-progress" data-progress="100">100% (完了)</div>
+        <div id="context-menu" class="absolute bg-white border shadow-lg rounded hidden z-50 py-1 w-40">
+            <div class="relative group">
+                <div class="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm font-bold text-gray-700 flex justify-between items-center">
+                    <span>進捗変更</span><span>▶</span>
+                </div>
+                <!-- サブメニュー（Hoverで表示） -->
+                <div class="absolute left-full top-0 hidden group-hover:block bg-white border shadow-lg rounded py-1 w-40 -ml-1">
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="0">0% (未着手)</div>
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="25">25%</div>
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="50">50%</div>
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="75">75%</div>
+                    <div class="px-4 py-2 hover:bg-green-100 cursor-pointer text-sm context-progress" data-progress="100">100% (完了)</div>
+                </div>
+            </div>
+            <div class="border-t my-1"></div>
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm font-bold text-gray-700" id="ctx-copy">コピー (Ctrl+C)</div>
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm font-bold text-gray-700" id="ctx-paste">ペースト (Ctrl+V)</div>
+            <div class="border-t my-1"></div>
+            <div class="px-4 py-2 hover:bg-red-100 cursor-pointer text-sm font-bold text-red-600" id="ctx-delete">削除 (Delete)</div>
         </div>
     </div>
 
