@@ -48,6 +48,7 @@ async function reloadData() {
     await fetchTasks();
     buildGroups();
     buildHolidays();
+    updateParentBars();
     
     if (timeline) {
         timeline.setGroups(groups);
@@ -78,7 +79,8 @@ async function fetchTasks() {
             raw: t
         };
     });
-    items.add(parsedItems);
+    // 重複IDエラーでクラッシュするのを防ぐため、addではなくupdateを使用する
+    items.update(parsedItems);
 }
 
 function getMasterItem(type, idField, id) {
@@ -95,11 +97,14 @@ function renderItemContent(task) {
     const progress = parseInt(task.progress) || 0;
 
     return `
-        <div class="custom-item" style="background-color: ${bgColor};">
-            <div class="progress-bg" style="width: ${progress}%;"></div>
-            <div class="item-content">
-                <span class="member-badge" style="background-color: ${memberColor};">${memberName}</span>
-                <span class="task-name">${task.task_name} (${progress}%)</span>
+        <div class="custom-item-wrapper">
+            <span class="member-badge" style="background-color: ${memberColor};">${memberName}</span>
+            <div class="custom-item">
+                <div class="bg-layer" style="background-color: ${bgColor};"></div>
+                <div class="progress-bg" style="width: ${progress}%; background-color: ${bgColor};"></div>
+                <div class="item-content">
+                    <span class="task-name">${task.task_name}</span>
+                </div>
             </div>
         </div>
     `;
@@ -113,6 +118,7 @@ function buildGroups() {
             id: rel.release_id,
             content: `<b>${rel.release_name}</b>`,
             nestedGroups: [],
+            showNested: true,
             treeLevel: 1
         });
 
@@ -122,6 +128,7 @@ function buildGroups() {
                 id: charGroupId,
                 content: `${char.char_name} (${char.costume_name})`,
                 nestedGroups: [],
+                showNested: true,
                 treeLevel: 2
             });
             
@@ -193,23 +200,107 @@ function buildHolidays() {
     items.add(holidayItems);
 }
 
+function updateParentBars() {
+    // 既存の親バーを削除
+    const existingParentBars = items.get({ filter: item => item.isParentBar });
+    items.remove(existingParentBars.map(i => i.id));
+    
+    const allTasks = items.get({ filter: item => item.raw });
+    if (allTasks.length === 0) return;
+    
+    const parentBars = [];
+    
+    // 各グループの期間を計算
+    const groupBounds = {};
+    
+    allTasks.forEach(task => {
+        const parts = task.group.split('_');
+        if (parts.length < 3) return;
+        const releaseId = parts[0] + '_' + parts[1]; // e.g. R_001
+        const charGroupId = releaseId + '_' + parts[2] + '_' + parts[3]; // e.g. R_001_C_001
+        
+        // 開始日・終了日が空文字などで不正な場合はスキップ
+        const mStart = moment(task.start);
+        const mEnd = moment(task.end);
+        if (!mStart.isValid() || !mEnd.isValid()) return;
+
+        const taskStart = new Date(task.start).getTime();
+        const taskEnd = new Date(task.end).getTime();
+        
+        [releaseId, charGroupId].forEach(gid => {
+            if (!groupBounds[gid]) {
+                groupBounds[gid] = { start: taskStart, end: taskEnd };
+            } else {
+                groupBounds[gid].start = Math.min(groupBounds[gid].start, taskStart);
+                groupBounds[gid].end = Math.max(groupBounds[gid].end, taskEnd);
+            }
+        });
+    });
+    
+    // 親バーのアイテムを生成
+    Object.keys(groupBounds).forEach(gid => {
+        const bounds = groupBounds[gid];
+        const groupObj = groups.get(gid);
+        if (!groupObj) return;
+        
+        // もし計算結果が不正なら追加しない
+        if (isNaN(bounds.start) || isNaN(bounds.end)) return;
+        
+        const isCollapsed = groupObj.showNested === false;
+        const icon = isCollapsed ? '▶' : '▽';
+        // contentからタグを除去してテキストだけにする
+        const titleText = groupObj.content.replace(/<[^>]+>/g, '');
+        
+        parentBars.push({
+            id: 'parent_bar_' + gid,
+            group: gid,
+            start: new Date(bounds.start),
+            end: new Date(bounds.end),
+            content: `
+                <div class="parent-group-bar" data-group-id="${gid}">
+                    <span class="collapse-icon">${icon}</span>
+                    <span class="parent-title">${titleText}</span>
+                </div>
+            `,
+            type: 'range',
+            isParentBar: true,
+            className: 'vis-parent-bar',
+            editable: false // 親バーはドラッグできない
+        });
+    });
+    
+    // addではなくupdateを使用する
+    items.update(parentBars);
+}
+
 function initTimeline() {
     const container = document.getElementById('visualization');
     const options = {
         groupOrder: 'id',
         orientation: 'top', // 日付表示を最上部に
+        timeAxis: { scale: 'day', step: 1 }, // 初期は日表示、間引き防止
         format: {
-            minorLabels: {
-                day: 'D',
-                week: 'w[W]',    // 週表示 (例: 1W)
-                month: 'MMM',
-                year: 'YYYY'
+            minorLabels: function (date, scale, step) {
+                const m = moment(date);
+                // カレンダー上の「月の第何週目」かを計算（1w, 2w... 次の週は必ずカウントアップ）
+                const firstDayOfWeek = m.clone().startOf('month').day();
+                const monthWeek = Math.ceil((m.date() + firstDayOfWeek) / 7) + 'w';
+                
+                switch (scale) {
+                    case 'day': return m.format('D');
+                    case 'week': return monthWeek;
+                    case 'month': return m.format('M月');
+                    default: return m.format('YYYY');
+                }
             },
-            majorLabels: {
-                day: 'YYYY年 M月',
-                week: 'YYYY年 M月',
-                month: 'YYYY年',
-                year: ''
+            majorLabels: function (date, scale, step) {
+                const m = moment(date);
+                switch (scale) {
+                    case 'day': return m.format('YYYY年M月'); // 1wを削除
+                    case 'week': return m.format('YYYY年M月');
+                    case 'month': return m.format('YYYY年');
+                    default: return '';
+                }
             }
         },
         editable: {
@@ -229,12 +320,12 @@ function initTimeline() {
         margin: {
             item: {
                 horizontal: 0,
-                vertical: 2 // 行間を密接させる
+                vertical: 0 // 行間を密接させる
             },
             axis: 2
         },
-        zoomMin: 1000 * 60 * 60 * 24 * 7, // 1週間分。これ以上縮小すると1,3,5表示になるためストップさせる
-        zoomMax: 1000 * 60 * 60 * 24 * 30 * 12, // 1 year
+        zoomMin: 1000 * 60 * 60 * 24 * 3, // 3日分程度までに制限（細くなりすぎないように）
+        zoomMax: 1000 * 60 * 60 * 24 * 365, // 1年分程度までズームアウト可能に
         zoomKey: '', // デフォルトのまま（修飾キーなしで横方向のズーム）
         onMove: function (item, callback) {
             saveHistory();
@@ -250,11 +341,45 @@ function initTimeline() {
 
     // Events
     timeline.on('doubleClick', function (props) {
-        if (props.item) {
+        if (props.item && !items.get(props.item).isParentBar) {
             openEditor(props.item);
         } else if (props.group && props.time) {
             // New task
             openEditorNew(props.group, props.time);
+        }
+    });
+
+    timeline.on('click', function (props) {
+        // 親バーのクリックで折りたたみをトグルする
+        if (props.item) {
+            const item = items.get(props.item);
+            if (item && item.isParentBar) {
+                const groupId = item.group;
+                const groupObj = groups.get(groupId);
+                if (groupObj) {
+                    const isCollapsed = groupObj.showNested === false;
+                    groups.update({ id: groupId, showNested: !isCollapsed });
+                    // アイコンを変えるためにバーを再描画
+                    updateParentBars();
+                }
+            }
+        }
+    });
+
+    let currentTimeScale = 'day';
+    // ズームアウトに応じて、日表示と週表示を強制的に切り替える
+    timeline.on('rangechange', function (props) {
+        if (!props.byUser) return;
+        const range = props.end - props.start;
+        // 閾値：限界まで極限まで日表示を維持（約150日分、約5ヶ月幅まで粘る）
+        const THRESHOLD = 1000 * 60 * 60 * 24 * 150;
+        
+        if (range > THRESHOLD && currentTimeScale !== 'week') {
+            currentTimeScale = 'week';
+            timeline.setOptions({ timeAxis: { scale: 'week', step: 1 } });
+        } else if (range <= THRESHOLD && currentTimeScale !== 'day') {
+            currentTimeScale = 'day';
+            timeline.setOptions({ timeAxis: { scale: 'day', step: 1 } });
         }
     });
 
@@ -501,6 +626,7 @@ function setupEventListeners() {
             items.add(item);
         }
 
+        updateParentBars();
         markUnsaved();
         panel.classList.add('translate-x-full');
     });
@@ -510,6 +636,7 @@ function setupEventListeners() {
         if(confirm('本当に削除しますか？')) {
             saveHistory();
             items.remove(id);
+            updateParentBars();
             markUnsaved();
             panel.classList.add('translate-x-full');
         }
@@ -553,30 +680,30 @@ function setupEventListeners() {
     });
 }
 
-let currentBarHeight = 24;
+let currentScale = 1.0;
 
 function setupCustomScroll() {
     const container = document.getElementById('visualization');
     if (!container) return;
     
-    // CTRL + マウスホイールで行（バー）の高さ調整
+    // CTRL + マウスホイールでUI全体の拡縮（ブラウザズーム風）
     container.addEventListener('wheel', (e) => {
         if (e.ctrlKey) {
-            e.preventDefault(); // ブラウザのズームを無効化
-            e.stopPropagation(); // Vis.jsのズームを無効化
+            e.preventDefault(); // ブラウザ自体のズームを無効化
+            e.stopPropagation(); // Vis.jsの日付ズームを無効化
             
             // 上スクロールで拡大、下スクロールで縮小
             if (e.deltaY < 0) {
-                currentBarHeight = Math.min(currentBarHeight + 2, 60);
+                currentScale = Math.min(currentScale + 0.05, 2.0);
             } else {
-                currentBarHeight = Math.max(currentBarHeight - 2, 5); // 限界まで細くできるように
+                currentScale = Math.max(currentScale - 0.05, 0.4);
             }
-            document.documentElement.style.setProperty('--bar-height', currentBarHeight + 'px');
             
-            // Timelineの再描画を促してテトリス配置を更新する
+            document.documentElement.style.setProperty('--ui-scale', currentScale);
+            
+            // ズーム変更後にVis.jsの内部計算を更新させるため再描画
             if (timeline) {
-                // marginオプションを再セットすることでVis.jsに高さの再計算を強制する
-                timeline.setOptions({ margin: { item: { horizontal: 0, vertical: 2 }, axis: 2 } });
+                timeline.redraw();
             }
         }
     }, { passive: false, capture: true });

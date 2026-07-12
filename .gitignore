@@ -1,2 +1,5 @@
-# data folder is managed by SVN, so exclude from Git except the folder itself
-data/*.csv
+# Ignore all csv files in data folder and subfolders
+data/**/*.csv
+
+# But keep Sample project data for Git tracking
+!data/projects/Sample/*.csv

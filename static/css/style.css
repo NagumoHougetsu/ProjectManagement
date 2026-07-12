@@ -24,30 +24,65 @@
 
 .vis-timeline {
     background-color: #fff; /* タイムライン全体のベース背景を白に */
+    zoom: var(--ui-scale, 1);
+    transform-origin: left top;
+}
+
+/* 左側のグループラベルエリアを完全に非表示にして、ガントエリアだけにする */
+/* もしこれでクラッシュする場合はCSSから削除するか別の方法をとる */
+.vis-panel.vis-left,
+.vis-labelset {
+    display: none !important;
 }
 
 /* Vis.js のアイテム自体のデフォルトの枠線を消す */
-.vis-item {
+.vis-item,
+.vis-item.vis-range,
+.vis-item-overflow,
+.vis-item-content {
     border-color: transparent !important;
     background-color: transparent !important;
     padding: 0 !important;
     z-index: 2 !important;
+    overflow: visible !important; /* バーの外側に飛び出させるアイコンが隠れないようにする */
 }
 
 .vis-item-content {
-    padding: 0 !important;
     width: 100%;
     height: 100%;
     display: flex;
     align-items: center;
 }
 
+/* バーと左アイコンを包むラッパー */
+.custom-item-wrapper {
+    display: flex;
+    align-items: center;
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+/* 担当者座布団（アイコン）: バーの左外側に飛び出す */
+.member-badge {
+    position: absolute;
+    right: 100%; /* バーの左端の外側へ */
+    margin-right: 4px; /* バーとの隙間 */
+    padding: 2px 6px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff;
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    z-index: 10;
+}
+
 /* カスタムアイテムの表示領域（ガントバー本体） */
 .custom-item {
     position: relative;
     width: 100%;
-    height: var(--bar-height, 24px); /* 行高さ調整用に変数を使用 */
-    min-height: 14px;
+    height: 24px; /* 高さを固定 */
     border-radius: 8px; /* 角丸 */
     color: #fff;
     font-size: 12px;
@@ -56,15 +91,26 @@
     align-items: center;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     cursor: pointer;
+    overflow: hidden; /* 背景や進捗バーが角丸からはみ出ないようにする */
 }
 
-/* 進捗バーの背景 */
+/* 全体の淡い背景レイヤー */
+.bg-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.4; /* 淡くする（未進行部分） */
+    z-index: 0;
+}
+
+/* 進捗バーの背景（濃い色） */
 .progress-bg {
     position: absolute;
     top: 0;
     left: 0;
     height: 100%;
-    background-color: rgba(255, 255, 255, 0.3); /* 進捗部分は白っぽくまたは濃くする等 */
     z-index: 1;
 }
 
@@ -76,20 +122,6 @@
     align-items: center;
     width: 100%;
     padding: 0 4px;
-}
-
-/* 担当者座布団（アイコン） */
-.member-badge {
-    position: relative;
-    margin-right: 6px;
-    padding: 2px 6px;
-    border-radius: 12px;
-    font-size: 10px;
-    font-weight: bold;
-    color: #fff;
-    white-space: nowrap;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-    z-index: 10;
 }
 
 .task-name {
@@ -107,6 +139,34 @@
 .vis-item.vis-selected .custom-item {
     border-color: #ff0000;
     box-shadow: 0 0 5px red;
+}
+
+/* 親階層バー（折りたたみ用）のスタイル */
+.parent-group-bar {
+    position: relative;
+    width: 100%;
+    height: 24px;
+    border-radius: 4px;
+    background-color: #666; /* グレー背景 */
+    color: #fff; /* 白文字 */
+    font-size: 14px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 0 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    z-index: 5;
+}
+
+.parent-group-bar:hover {
+    background-color: #555;
+}
+
+.collapse-icon {
+    margin-right: 6px;
+    font-family: monospace;
+    font-size: 16px;
 }
 
 /* 休日背景色 */
@@ -127,8 +187,10 @@
 .vis-time-axis .vis-text {
     padding-left: 0 !important;
     padding-right: 0 !important;
-    font-size: 10px !important;
-    letter-spacing: -0.5px;
-    min-width: 14px !important; /* ギリギリまで数字を残すための最小幅設定 */
+    font-size: 9px !important;
+    letter-spacing: -1px;
+    min-width: 8px !important; /* 極限まで狭く */
+    transform: scaleX(0.8);
+    transform-origin: center;
     overflow: hidden;
 }
