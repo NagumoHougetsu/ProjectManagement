@@ -231,8 +231,7 @@ function buildHolidays() {
         });
     }
     
-    // 背景アイテムを一時的に無効化して検証
-    // items.add(holidayItems);
+    items.add(holidayItems);
 }
 
 function updateParentBars() {
