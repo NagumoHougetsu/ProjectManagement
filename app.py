@@ -73,6 +73,14 @@ def receive_log():
         print(f"\\n============================\\n[JS {data.get('type', 'INFO')}] {data.get('message', '')}\\n============================\\n")
     return jsonify({"status": "ok"})
 
+@app.route('/api/restart', methods=['POST'])
+def restart_server():
+    print("Restart requested. Exiting current process...")
+    if os.path.exists('WBSツール起動.bat'):
+        os.system('start "" "WBSツール起動.bat"')
+    os._exit(0)
+    return jsonify({"status": "ok"})
+
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
     if not os.path.exists(PROJECTS_DIR):

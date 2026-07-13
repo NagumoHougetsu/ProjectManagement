@@ -8,20 +8,22 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Moment.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
-    <!-- Vis.js Timeline CSS & JS -->
-    <script type="text/javascript" src="https://unpkg.com/vis-timeline@latest/standalone/umd/vis-timeline-graph2d.min.js"></script>
-    <link href="https://unpkg.com/vis-timeline@latest/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
     <!-- Custom CSS -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ ts }}">
+    <script>
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = "{{ url_for('static', filename='css/style.css') }}?v=" + new Date().getTime();
+        document.head.appendChild(link);
+    </script>
 </head>
-<body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
+<body class="bg-gray-100 h-screen flex flex-col overflow-hidden text-sm">
     <!-- Header -->
-    <header class="bg-blue-800 text-white p-4 flex justify-between items-center shadow-md z-10">
+    <header class="bg-blue-800 text-white p-4 flex justify-between items-center shadow-md z-30">
         <div class="flex items-center space-x-4">
-            <h1 class="text-xl font-bold">次世代アートWBSツール (最新版 v10)</h1>
+            <h1 class="text-xl font-bold">次世代アートWBSツール (完全自作版)</h1>
             <select id="project-select" class="text-black px-2 py-1 rounded border"></select>
             <div class="flex items-center space-x-2 ml-4">
-                <label for="filter-section" class="text-sm font-bold">稼働Line表示:</label>
+                <label for="filter-section" class="font-bold">稼働Line表示:</label>
                 <select id="filter-section" class="text-black px-2 py-1 rounded border">
                     <option value="">全セクション表示</option>
                 </select>
@@ -33,61 +35,93 @@
             <button id="btn-redo" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded transition disabled:opacity-50" disabled>やり直し</button>
             <a href="/master_editor" target="_blank" class="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded transition">マスタ管理</a>
             <button id="btn-save" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded font-bold shadow transition">保存</button>
+            <button id="btn-restart" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded font-bold shadow transition">サーバー再起動</button>
         </div>
     </header>
 
     <!-- Main Content -->
     <div class="flex flex-1 overflow-hidden relative">
-        <!-- Timeline Container -->
-        <div id="visualization" class="flex-1 overflow-hidden bg-white"></div>
+        <!-- Gantt Container (完全自作) -->
+        <div id="gantt-container" class="flex flex-1 overflow-hidden bg-white relative">
+            
+            <!-- 左側：ツリーラベルエリア（非表示だがDOMは維持しておくか、完全に消すか）-->
+            <div id="gantt-left" class="hidden w-64 flex-shrink-0 border-r bg-white flex flex-col z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] relative">
+                <div id="gantt-left-header" class="h-16 border-b border-gray-300 bg-gray-100 flex items-center px-4 font-bold text-gray-700">タスク階層</div>
+                <div id="gantt-left-body" class="flex-1 overflow-hidden relative bg-white">
+                    <div id="gantt-left-content" class="absolute top-0 left-0 w-full transition-transform duration-75"></div>
+                </div>
+            </div>
+            
+            <!-- 右側：タイムラインエリア -->
+            <div id="gantt-right" class="flex-1 flex flex-col relative bg-white overflow-hidden">
+                <!-- タイムラインヘッダー（日付スケール＋稼働Line数） -->
+                <div id="gantt-header" class="h-[120px] border-b border-gray-300 bg-gray-50 flex-shrink-0 overflow-hidden relative select-none">
+                    <div id="gantt-header-content" class="absolute top-0 left-0 h-full min-w-full transition-transform duration-75"></div>
+                </div>
+                <!-- タイムラインボディ（スクロール領域） -->
+                <div id="gantt-body" class="flex-1 overflow-auto relative select-none">
+                    <div id="gantt-body-content" class="absolute top-0 left-0 min-h-full">
+                        <!-- カレンダーの背景（休日色・罫線） -->
+                        <div id="gantt-grid" class="absolute top-0 left-0 w-full h-full pointer-events-none"></div>
+                        <!-- 行（レーン）の背景と区切り線 -->
+                        <div id="gantt-rows" class="absolute top-0 left-0 w-full h-full pointer-events-none"></div>
+                        <!-- タスクの配置コンテナ -->
+                        <div id="gantt-tasks" class="absolute top-0 left-0 w-full h-full z-10"></div>
+                        <!-- マウス追従ハイライト -->
+                        <div id="gantt-crosshair-col" class="hidden absolute top-0 bottom-0 bg-blue-500/10 pointer-events-none z-10 border-l border-r border-blue-500/20"></div>
+                        <div id="gantt-crosshair-row" class="hidden absolute left-0 right-0 bg-blue-500/10 pointer-events-none z-10 border-t border-b border-blue-500/20"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Side Panel Editor -->
-        <div id="side-panel" class="w-80 bg-white border-l shadow-xl flex flex-col transform translate-x-full transition-transform duration-300 absolute right-0 top-0 h-full z-20">
+        <div id="side-panel" class="w-80 bg-white border-l shadow-xl flex flex-col transform translate-x-full transition-transform duration-300 absolute right-0 top-0 h-full z-40">
             <div class="p-4 bg-gray-200 border-b flex justify-between items-center">
                 <h2 id="editor-title" class="font-bold text-lg">タスク編集</h2>
-                <button id="btn-close-panel" class="text-gray-500 hover:text-black">&times;</button>
+                <button id="btn-close-panel" class="text-gray-500 hover:text-black text-xl">&times;</button>
             </div>
             <div class="p-4 flex-1 overflow-y-auto space-y-4">
                 <input type="hidden" id="edit-task-id">
                 
                 <div>
-                    <label class="block text-sm font-bold mb-1">バージョン</label>
+                    <label class="block font-bold mb-1">バージョン</label>
                     <select id="edit-release" class="w-full border rounded p-2"></select>
                 </div>
                 
                 <div>
-                    <label class="block text-sm font-bold mb-1">キャラクター</label>
+                    <label class="block font-bold mb-1">キャラクター</label>
                     <select id="edit-character" class="w-full border rounded p-2"></select>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-bold mb-1">セクション</label>
+                    <label class="block font-bold mb-1">セクション</label>
                     <select id="edit-section" class="w-full border rounded p-2"></select>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-bold mb-1">タスク名 (雛形)</label>
+                    <label class="block font-bold mb-1">タスク名 (雛形)</label>
                     <select id="edit-task-name" class="w-full border rounded p-2"></select>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-bold mb-1">担当者</label>
+                    <label class="block font-bold mb-1">担当者</label>
                     <select id="edit-member" class="w-full border rounded p-2"></select>
                 </div>
 
                 <div class="flex space-x-2">
                     <div class="flex-1">
-                        <label class="block text-sm font-bold mb-1">開始日</label>
+                        <label class="block font-bold mb-1">開始日</label>
                         <input type="date" id="edit-start" class="w-full border rounded p-2">
                     </div>
                     <div class="flex-1">
-                        <label class="block text-sm font-bold mb-1">終了日</label>
+                        <label class="block font-bold mb-1">終了日</label>
                         <input type="date" id="edit-end" class="w-full border rounded p-2">
                     </div>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-bold mb-1">進捗率 (%)</label>
+                    <label class="block font-bold mb-1">進捗率 (%)</label>
                     <input type="number" id="edit-progress" min="0" max="100" class="w-full border rounded p-2">
                 </div>
             </div>
@@ -100,27 +134,32 @@
         <!-- Context Menu -->
         <div id="context-menu" class="absolute bg-white border shadow-lg rounded hidden z-50 py-1 w-40">
             <div class="relative group">
-                <div class="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm font-bold text-gray-700 flex justify-between items-center">
+                <div class="px-4 py-2 hover:bg-gray-100 cursor-pointer font-bold text-gray-700 flex justify-between items-center">
                     <span>進捗変更</span><span>▶</span>
                 </div>
                 <!-- サブメニュー（Hoverで表示） -->
                 <div class="absolute left-full top-0 hidden group-hover:block bg-white border shadow-lg rounded py-1 w-40 -ml-1">
-                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="0">0% (未着手)</div>
-                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="25">25%</div>
-                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="50">50%</div>
-                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm context-progress" data-progress="75">75%</div>
-                    <div class="px-4 py-2 hover:bg-green-100 cursor-pointer text-sm context-progress" data-progress="100">100% (完了)</div>
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer context-progress" data-progress="0">0% (未着手)</div>
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer context-progress" data-progress="25">25%</div>
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer context-progress" data-progress="50">50%</div>
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer context-progress" data-progress="75">75%</div>
+                    <div class="px-4 py-2 hover:bg-green-100 cursor-pointer context-progress" data-progress="100">100% (完了)</div>
                 </div>
             </div>
             <div class="border-t my-1"></div>
-            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm font-bold text-gray-700" id="ctx-copy">コピー (Ctrl+C)</div>
-            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer text-sm font-bold text-gray-700" id="ctx-paste">ペースト (Ctrl+V)</div>
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700" id="ctx-copy">コピー (Ctrl+C)</div>
+            <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700" id="ctx-paste">ペースト (Ctrl+V)</div>
             <div class="border-t my-1"></div>
-            <div class="px-4 py-2 hover:bg-red-100 cursor-pointer text-sm font-bold text-red-600" id="ctx-delete">削除 (Delete)</div>
+            <div class="px-4 py-2 hover:bg-red-100 cursor-pointer font-bold text-red-600" id="ctx-delete">削除 (Delete)</div>
         </div>
     </div>
 
     <!-- Main App Logic -->
-    <script src="{{ url_for('static', filename='js/app.js') }}?v={{ ts }}"></script>
+    <script>
+        const script = document.createElement('script');
+        // 完全自作版のJS（app_v3.js）を読み込む
+        script.src = "{{ url_for('static', filename='js/app_v3.js') }}?v=" + new Date().getTime();
+        document.body.appendChild(script);
+    </script>
 </body>
 </html>

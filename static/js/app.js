@@ -593,7 +593,6 @@ function initTimeline() {
 
     // Events
     timeline.on('doubleClick', function (props) {
-        serverLog('DEBUG', "doubleClick: " + JSON.stringify(props));
         if (props.item && !items.get(props.item).isParentBar) {
             openEditor(props.item);
         } else if (props.group && props.time) {
@@ -603,7 +602,7 @@ function initTimeline() {
     });
 
     timeline.on('select', function (props) {
-        serverLog('DEBUG', "select: " + JSON.stringify(props));
+        // do nothing
     });
 
     // 描画が更新されるたびに背景を描画し直す
@@ -612,7 +611,6 @@ function initTimeline() {
     });
 
     timeline.on('click', function (props) {
-        serverLog('DEBUG', "click: " + JSON.stringify(props));
         // 親バーのクリックで折りたたみをトグルする
         if (props.item) {
             const item = items.get(props.item);
@@ -669,13 +667,77 @@ function initTimeline() {
         }
     });
 
-    // マウス位置を常に追跡してCTRL+Vでのペースト先を決める
-    container.addEventListener('mousemove', (e) => {
-        const props = timeline.getEventProperties(e);
-        if (props && props.group && props.time) {
-            lastMouseGroup = props.group;
-            lastMouseTime = props.time;
+    let crosshairTimeId = 'crosshair_time';
+    try {
+        timeline.addCustomTime(new Date(), crosshairTimeId);
+    } catch (e) {
+        // すでに存在する場合は無視
+    }
+
+    // ツールチップ要素
+    let crosshairTooltip = document.getElementById('crosshair-tooltip');
+    if (!crosshairTooltip) {
+        crosshairTooltip = document.createElement('div');
+        crosshairTooltip.id = 'crosshair-tooltip';
+        crosshairTooltip.style.position = 'fixed';
+        crosshairTooltip.style.backgroundColor = '#2563eb';
+        crosshairTooltip.style.color = '#fff';
+        crosshairTooltip.style.padding = '4px 8px';
+        crosshairTooltip.style.borderRadius = '4px';
+        crosshairTooltip.style.fontSize = '12px';
+        crosshairTooltip.style.fontWeight = 'bold';
+        crosshairTooltip.style.pointerEvents = 'none';
+        crosshairTooltip.style.zIndex = '9999';
+        crosshairTooltip.style.display = 'none';
+        crosshairTooltip.style.transform = 'translate(-50%, -100%)';
+        crosshairTooltip.style.marginTop = '-15px';
+        crosshairTooltip.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+        document.body.appendChild(crosshairTooltip);
+    }
+
+    // Vis.jsの伝播停止を回避するため、documentレベルのキャプチャフェーズで取得する
+    document.addEventListener('mousemove', (e) => {
+        // Timelineの外側なら非表示にする
+        if (!e.target.closest('#visualization')) {
+            crosshairTooltip.style.display = 'none';
+            return;
         }
+
+        try {
+            const props = timeline.getEventProperties(e);
+            if (props && props.time) {
+                if (props.group) {
+                    lastMouseGroup = props.group;
+                }
+                lastMouseTime = props.time;
+
+                // vis.js標準のカスタムタイムバーをマウスの位置（その日の0時）に移動
+                const mDate = moment(props.time).startOf('day');
+                try {
+                    timeline.setCustomTime(mDate.toDate(), crosshairTimeId);
+                } catch (err) {
+                    // ignore
+                }
+
+                // ツールチップの更新
+                const days = ['日', '月', '火', '水', '木', '金', '土'];
+                const dayStr = days[mDate.day()];
+                crosshairTooltip.innerText = mDate.format('MM/DD') + ` (${dayStr})`;
+                
+                crosshairTooltip.style.left = e.clientX + 'px';
+                crosshairTooltip.style.top = e.clientY + 'px';
+                crosshairTooltip.style.display = 'block';
+            } else {
+                crosshairTooltip.style.display = 'none';
+            }
+        } catch (err) {
+            // 例外時は非表示
+            crosshairTooltip.style.display = 'none';
+        }
+    }, true); // true = capture phase
+    
+    document.addEventListener('mouseleave', () => {
+        crosshairTooltip.style.display = 'none';
     });
 
     timeline.on('contextmenu', function (props) {

@@ -1,135 +1,124 @@
-/* Vis.js タイムラインのカスタムスタイル */
-.vis-timeline {
-    border: none;
-    font-family: inherit;
+/* 完全自作ガント用 CSS */
+
+/* 全体のデフォルト設定 */
+body, html {
+    margin: 0;
+    padding: 0;
 }
 
-/* Vis.jsの背景色（ストライプ・奇数偶数行・枠線など）を完全に透明化 */
-.vis-timeline .vis-group,
-.vis-timeline .vis-group.vis-odd,
-.vis-timeline .vis-group.vis-even,
-.vis-panel.vis-background .vis-group,
-.vis-panel.vis-background .vis-group.vis-odd,
-.vis-panel.vis-background .vis-group.vis-even,
-.vis-panel.vis-center .vis-group,
-.vis-panel.vis-center .vis-group.vis-odd,
-.vis-panel.vis-center .vis-group.vis-even,
-.vis-labelset .vis-label,
-.vis-labelset .vis-label.vis-odd,
-.vis-labelset .vis-label.vis-even,
-.vis-time-axis .vis-grid.vis-odd,
-.vis-time-axis .vis-grid.vis-even,
-.vis-time-axis .vis-grid.vis-minor,
-.vis-time-axis .vis-grid.vis-major {
-    background: transparent !important;
-    background-color: transparent !important;
-}
-
-/* 邪魔な水平線を完全に消す */
-.vis-timeline .vis-grid.vis-horizontal,
-.vis-timeline .vis-grid.vis-vertical {
-    border-bottom: none !important;
-    border-color: transparent !important;
-}
-.vis-timeline .vis-group {
-    border-bottom: none !important;
-}
-
-.vis-timeline {
-    background-color: #fff; /* タイムライン全体のベース背景を白に */
-    transform-origin: left top;
-}
-
-/* 左側のグループラベルエリアを完全に非表示にして、ガントエリアだけにする */
-/* もしこれでクラッシュする場合はCSSから削除するか別の方法をとる */
-.vis-panel.vis-left,
-.vis-labelset {
-    display: none !important;
-}
-
-/* ドラッグ＆ドロップ先となるため、空のレーングループにも最低限の高さを持たせる */
-.vis-timeline .vis-group {
-    /* min-heightをCSSで強制するとアイテムの位置計算と当たり判定が狂う原因になるため削除 */
-    /* min-height: calc(30px * var(--ui-scale, 1)) !important; */
-}
-
-/* Vis.js のアイテム自体のデフォルトの枠線を消す */
-.vis-item {
-    background-color: transparent !important;
-    border-color: transparent !important;
-    z-index: 10 !important;
-    pointer-events: auto !important;
-    cursor: move;
-    user-select: none !important;
-    -webkit-user-drag: none !important;
-    touch-action: none !important; /* ブラウザのスクロール判定を無効化し、ドラッグ（pan）の即時発動を促す */
-}
-
-.vis-item.vis-selected {
-    background-color: transparent !important;
-    border-color: transparent !important;
-}
-.vis-item-content {
-    width: 100%;
-    display: block;
-    user-select: none !important;
-    line-height: 1;
-}
-
-/* バーと左アイコンを包むラッパー */
-.custom-item-wrapper {
-    position: relative;
-    width: 100%;
-    min-width: 0;
-    pointer-events: none; /* Vis.jsのドラッグ判定を安定させるため中身の要素はイベントを透過させる */
-}
-
-/* 担当者座布団（アイコン）: バーの内側左端に配置 */
-.member-badge {
+/* カレンダーグリッド線のベース */
+.gantt-grid-line {
     position: absolute;
-    left: 2px;
-    top: 50%;
-    transform: translateY(-50%);
+    top: 0;
+    bottom: 0;
+    border-right: 1px solid #eee;
+    pointer-events: none;
+}
+.gantt-grid-line-month {
+    border-left: 2px solid #333;
+}
+.gantt-grid-line-week {
+    border-left: 1px dashed #888;
+}
+
+/* 休日背景 */
+.bg-saturday {
+    background-color: rgba(173, 216, 230, 0.4);
+    pointer-events: none;
+}
+.bg-sunday-public {
+    background-color: rgba(255, 182, 193, 0.4);
+    pointer-events: none;
+}
+.bg-company-holiday {
+    background-color: rgba(211, 211, 211, 0.4);
+    pointer-events: none;
+}
+
+/* ヘッダーセル */
+.gantt-header-cell {
+    position: absolute;
+    border-right: 1px solid #ccc;
+    border-bottom: 1px solid #ccc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    color: #333;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+/* タイムライン側の行背景 */
+.gantt-timeline-row {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    border-bottom: 1px dashed #ddd; /* 薄い区切り線 */
+    pointer-events: none;
+}
+.gantt-timeline-row:hover {
+    background-color: rgba(59, 130, 246, 0.1);
+}
+
+/* タスクブロック */
+.gantt-task-item {
+    position: absolute;
+    border-radius: calc(8px * var(--ui-scale, 1));
+    display: flex;
+    align-items: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    cursor: move;
+    overflow: hidden;
+    user-select: none;
+    z-index: 20;
+}
+.gantt-task-item.selected {
+    box-shadow: 0 0 0 3px #fbbf24;
+}
+.gantt-task-item.completed {
+    opacity: 0.6;
+}
+
+/* タスク内の担当者バッジ */
+.gantt-member-badge {
     padding: calc(2px * var(--ui-scale, 1)) calc(6px * var(--ui-scale, 1));
     border-radius: calc(12px * var(--ui-scale, 1));
     font-size: calc(10px * var(--ui-scale, 1));
     font-weight: bold;
     color: #fff;
     white-space: nowrap;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    margin-left: 2px;
+    margin-right: calc(4px * var(--ui-scale, 1));
     z-index: 10;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    flex-shrink: 0;
 }
 
-/* カスタムアイテムの表示領域（ガントバー本体） */
-.custom-item {
-    position: relative;
-    width: 100%;
-    height: calc(24px * var(--ui-scale, 1)); /* 高さを固定 */
-    border-radius: calc(8px * var(--ui-scale, 1)); /* 角丸 */
-    color: #fff;
+/* タスク名 */
+.gantt-task-name {
     font-size: calc(12px * var(--ui-scale, 1));
     font-weight: bold;
-    display: flex;
-    align-items: center;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-    cursor: pointer;
-    overflow: hidden; /* 背景や進捗バーが角丸からはみ出ないようにする */
-    min-width: 0;
+    color: #fff;
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 10;
+    flex-grow: 1;
 }
 
-/* 全体の淡い背景レイヤー */
-.bg-layer {
+/* タスク背景（色・進捗） */
+.gantt-task-bg {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    opacity: 0.4; /* 淡くする（未進行部分） */
+    opacity: 0.4;
     z-index: 0;
 }
-
-/* 進捗バーの背景（濃い色） */
-.progress-bg {
+.gantt-task-progress {
     position: absolute;
     top: 0;
     left: 0;
@@ -137,121 +126,49 @@
     z-index: 1;
 }
 
-/* テキストや座布団のコンテナ */
-.item-content {
-    position: relative;
-    z-index: 2;
-    display: flex;
-    align-items: center;
+/* リサイズ用のハンドル */
+.gantt-resize-handle {
+    position: absolute;
+    top: 0;
+    width: 10px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 20;
+}
+.gantt-resize-handle-left {
+    left: 0;
+}
+.gantt-resize-handle-right {
+    right: 0;
+}
+
+/* ヒートマップ */
+.heatmap-bar {
+    position: absolute;
+    bottom: 0;
+}
+.heatmap-text {
+    position: absolute;
     width: 100%;
-    padding-left: calc(36px * var(--ui-scale, 1)); /* バッジの分だけ右にずらす */
-    padding-right: 4px;
-    box-sizing: border-box; /* paddingを含めた幅を100%にするために必須！これがないと右にはみ出して当たり判定が狂う */
-    min-width: 0;
-}
-
-.task-name {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
-    min-width: 0;
-}
-
-/* 進捗100%の場合は少し透明にする */
-.vis-item.completed {
-    opacity: 0.6;
-}
-
-.vis-item.vis-selected .custom-item {
-    box-shadow: 0 0 0 3px #fbbf24 !important; /* Tailwindのyellow-400相当 */
-}
-
-/* 親階層バー（折りたたみ用）のスタイル */
-.parent-group-bar {
-    position: relative;
-    width: 100%;
-    height: calc(24px * var(--ui-scale, 1));
-    border-radius: 4px;
-    background-color: #666; /* グレー背景 */
-    color: #fff; /* 白文字 */
-    font-size: calc(14px * var(--ui-scale, 1));
+    text-align: center;
+    font-size: 10px;
     font-weight: bold;
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    padding: 0 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    z-index: 5;
+    color: #333;
+    pointer-events: none;
 }
 
-.parent-group-bar:hover {
-    background-color: #555;
-}
-
-.parent-group-bar.char-group-bar {
-    background-color: #e5e7eb; /* Tailwindのgray-200相当（淡いグレー） */
-    color: #000; /* 黒の太字 */
-    font-weight: 900;
-}
-.parent-group-bar.char-group-bar:hover {
-    background-color: #d1d5db;
-}
-
-.collapse-icon {
-    margin-right: 6px;
-    font-family: monospace;
-    font-size: calc(16px * var(--ui-scale, 1));
-}
-
-/* 休日背景色 */
-.bg-saturday {
-    background-color: rgba(173, 216, 230, 0.4) !important; /* 薄い青 */
-    pointer-events: none !important;
-}
-.bg-sunday-public {
-    background-color: rgba(255, 182, 193, 0.4) !important; /* 薄い赤 */
-    pointer-events: none !important;
-}
-.bg-company-holiday {
-    background-color: rgba(211, 211, 211, 0.4) !important; /* 薄いグレー */
-    pointer-events: none !important;
-}
-.bg-weekday {
-    background-color: #ffffff !important; /* 平日は強制的に白で塗りつぶす */
-    pointer-events: none !important;
-}
-
-/* タイムラインの軸のテキストや幅を詰める（極限まで狭く） */
-.vis-time-axis .vis-text {
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-    font-size: 9px !important; /* 日付・週番号用 */
-    letter-spacing: -1px;
-    min-width: 8px !important;
-    transform: scaleX(0.8);
-    transform-origin: center;
-    overflow: hidden;
-    text-align: center !important; /* 日付を真ん中寄せにする */
-    width: 100%; /* セル幅いっぱいにして中央揃えを効かせる */
-}
-
-/* 年月のラベルだけは大きく表示する */
-.vis-time-axis .vis-text.vis-major {
-    font-size: 16px !important;
-    font-weight: bold;
-    transform: none;
-    letter-spacing: normal;
-    padding-left: 6px !important; /* 太線と被るのを防ぐため右にずらす */
-    text-align: left !important; /* 年月は左寄せのまま */
-    width: auto;
-}
-
-/* 空レーンのドロップ判定用ダミーアイテム */
-.dummy-lane-item {
-    background: transparent !important;
-    border: none !important;
-    pointer-events: none !important;
-    height: 1px !important;
-    z-index: -10 !important;
+/* 印刷用 */
+@media print {
+    header, #side-panel, #context-menu, #unsaved-badge {
+        display: none !important;
+    }
+    body, html, #gantt-container {
+        height: auto !important;
+        overflow: visible !important;
+    }
+    * {
+        -webkit-print-color-adjust: exact !important;
+        color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
 }
