@@ -13,7 +13,9 @@ window.addEventListener('error', function(e) {
 // --- State ---
 let masters = {};
 let allTasksRaw = [];
+let availableProjects = [];
 let currentProject = 'Sample';
+let openProjects = []; // 開かれているプロジェクトタブ
 let hasUnsavedChanges = false;
 
 let historyStack = [];
@@ -65,13 +67,141 @@ async function init() {
 
 async function fetchProjects() {
     const res = await fetch('/api/projects');
-    const projects = await res.json();
-    const sel = document.getElementById('project-select');
-    sel.innerHTML = projects.map(p => `<option value="${p}">${p}</option>`).join('');
-    if (projects.length > 0) {
-        currentProject = projects[0];
-        sel.value = currentProject;
+    availableProjects = await res.json();
+    
+    const stored = localStorage.getItem('openProjects');
+    if (stored) {
+        try {
+            openProjects = JSON.parse(stored);
+        } catch (e) {}
     }
+    
+    // 有効なプロジェクトのみ残す
+    openProjects = openProjects.filter(p => availableProjects.includes(p));
+    
+    if (openProjects.length === 0 && availableProjects.length > 0) {
+        openProjects = [availableProjects[0]];
+    }
+    
+    const storedCurrent = localStorage.getItem('currentProject');
+    if (storedCurrent && openProjects.includes(storedCurrent)) {
+        currentProject = storedCurrent;
+    } else if (openProjects.length > 0) {
+        currentProject = openProjects[0];
+    } else {
+        currentProject = null;
+    }
+
+    renderTabs();
+}
+
+function renderTabs() {
+    const container = document.getElementById('project-tabs-container');
+    if (!container) return;
+    
+    let html = '';
+    openProjects.forEach(p => {
+        const isActive = p === currentProject;
+        const activeClasses = isActive
+            ? 'bg-white text-blue-800 border-t-2 border-blue-500 font-bold'
+            : 'bg-gray-300 text-gray-700 hover:bg-gray-200 cursor-pointer';
+        
+        html += `
+            <div class="px-4 py-2 rounded-t flex items-center group transition-colors ${activeClasses}"
+                 onclick="switchProjectTab('${p}')">
+                <span>${p}</span>
+                <span class="ml-2 text-gray-500 hover:text-red-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity"
+                      onclick="closeProjectTab(event, '${p}')">&times;</span>
+            </div>
+        `;
+    });
+    
+    html += `
+        <div class="px-3 py-2 bg-gray-300 text-gray-600 rounded-t hover:bg-gray-200 cursor-pointer font-bold"
+             onclick="openNewProjectDialog()">＋</div>
+    `;
+    
+    container.innerHTML = html;
+    
+    localStorage.setItem('openProjects', JSON.stringify(openProjects));
+    if (currentProject) localStorage.setItem('currentProject', currentProject);
+}
+
+async function switchProjectTab(p) {
+    if (p === currentProject) return;
+    if (hasUnsavedChanges && !confirm('未保存の変更がありますが、プロジェクトを切り替えますか？')) return;
+    
+    currentProject = p;
+    hasUnsavedChanges = false;
+    els.unsavedBadge.classList.add('hidden');
+    renderTabs();
+    await reloadData();
+    const meLink = document.getElementById('master-editor-link');
+    if (meLink) meLink.href = `/master_editor?project=${currentProject}`;
+}
+
+function closeProjectTab(e, p) {
+    e.stopPropagation();
+    if (p === currentProject && hasUnsavedChanges && !confirm('未保存の変更がありますが、タブを閉じますか？')) return;
+    
+    openProjects = openProjects.filter(x => x !== p);
+    
+    if (openProjects.length === 0) {
+        currentProject = null;
+    } else if (currentProject === p) {
+        currentProject = openProjects[openProjects.length - 1];
+    }
+    
+    renderTabs();
+    if (currentProject) {
+        hasUnsavedChanges = false;
+        els.unsavedBadge.classList.add('hidden');
+        reloadData().then(() => {
+            const meLink = document.getElementById('master-editor-link');
+            if (meLink) meLink.href = `/master_editor?project=${currentProject}`;
+        });
+    } else {
+        els.ganttTasks.innerHTML = '';
+        els.ganttHeaderContent.innerHTML = '';
+        els.ganttGrid.innerHTML = '';
+        els.ganttRows.innerHTML = '';
+    }
+}
+
+function openNewProjectDialog() {
+    const sel = document.getElementById('new-tab-select');
+    sel.innerHTML = '<option value="">(選択しない)</option>' +
+        availableProjects.map(p => `<option value="${p}">${p}</option>`).join('');
+    document.getElementById('new-project-name').value = '';
+    document.getElementById('new-project-dialog').classList.remove('hidden');
+}
+
+function closeNewProjectDialog() {
+    document.getElementById('new-project-dialog').classList.add('hidden');
+}
+
+async function applyNewProject() {
+    const selVal = document.getElementById('new-tab-select').value;
+    const inputVal = document.getElementById('new-project-name').value.trim();
+    
+    const targetProject = inputVal || selVal;
+    if (!targetProject) {
+        alert('プロジェクトを選択するか、名前を入力してください。');
+        return;
+    }
+    
+    closeNewProjectDialog();
+    
+    if (!openProjects.includes(targetProject)) {
+        openProjects.push(targetProject);
+        if (!availableProjects.includes(targetProject)) {
+            availableProjects.push(targetProject);
+            // 新規作成された場合、バックエンドにもディレクトリを作成させるために一度APIを叩く
+            await fetch(`/api/tasks?project=${targetProject}`);
+        }
+    }
+    
+    await switchProjectTab(targetProject);
 }
 
 async function fetchMasters() {
@@ -150,9 +280,17 @@ function performRedo() {
 
 // --- Layout & Scroll Sync ---
 function setupScrollSync() {
+    let ticking = false;
+    els.ganttHeaderContent.style.willChange = 'transform';
     els.ganttBody.addEventListener('scroll', (e) => {
-        const scrollLeft = els.ganttBody.scrollLeft;
-        els.ganttHeaderContent.style.transform = `translateX(-${scrollLeft}px)`;
+        if (!ticking) {
+            window.requestAnimationFrame(() => {
+                const scrollLeft = els.ganttBody.scrollLeft;
+                els.ganttHeaderContent.style.transform = `translate3d(-${scrollLeft}px, 0, 0)`;
+                ticking = false;
+            });
+            ticking = true;
+        }
     });
 }
 
@@ -1005,18 +1143,6 @@ function setupMiscEvents() {
 
     document.getElementById('filter-section').addEventListener('change', () => {
         renderGantt();
-    });
-    
-    document.getElementById('project-select').addEventListener('change', async (e) => {
-        if (hasUnsavedChanges && !confirm('未保存の変更がありますが、プロジェクトを切り替えますか？')) {
-            e.target.value = currentProject;
-            return;
-        }
-        currentProject = e.target.value;
-        hasUnsavedChanges = false;
-        els.unsavedBadge.classList.add('hidden');
-        await reloadData();
-        document.querySelector('a[href^="/master_editor"]').href = `/master_editor?project=${currentProject}`;
     });
     
     els.ganttTasks.addEventListener('dblclick', (e) => {

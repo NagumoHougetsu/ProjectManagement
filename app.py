@@ -157,7 +157,7 @@ def save_masters():
         data = request.json
         # data = { 'release': [...], 'character': [...], ... }
         master_files = {
-            'release': ('m_release.csv', ['release_id', 'release_name', 'art_deadline', 'event_name']),
+            'release': ('m_release.csv', ['release_id', 'release_name', 'art_deadline', 'branch_deadline', 'release_date', 'event_name']),
             'character': ('m_character.csv', ['char_id', 'char_name', 'costume_name', 'category', 'usage', 'event_id']),
             'section': ('m_section.csv', ['section_id', 'section_name', 'color']),
             'member': ('m_member.csv', ['member_id', 'member_name', 'section_id', 'color']),

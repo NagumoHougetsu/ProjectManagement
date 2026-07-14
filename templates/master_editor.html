@@ -32,7 +32,7 @@
     <script>
         let mastersData = {};
         const schemas = {
-            release: ['release_id', 'release_name', 'art_deadline', 'event_name'],
+            release: ['release_id', 'release_name', 'art_deadline', 'branch_deadline', 'release_date', 'event_name'],
             character: ['char_id', 'char_name', 'costume_name', 'category', 'usage', 'event_id'],
             section: ['section_id', 'section_name', 'color'],
             member: ['member_id', 'member_name', 'section_id', 'color'],
@@ -65,6 +65,10 @@
             // Header
             const thead = document.createElement('thead');
             const trHead = document.createElement('tr');
+            const thDrag = document.createElement('th');
+            thDrag.className = 'py-2 px-2 border-b bg-gray-100 text-center w-10';
+            thDrag.textContent = '並替';
+            trHead.appendChild(thDrag);
             schema.forEach(col => {
                 const th = document.createElement('th');
                 th.className = 'py-2 px-4 border-b bg-gray-100 text-left text-sm font-bold text-gray-600';
@@ -80,13 +84,63 @@
 
             // Body
             const tbody = document.createElement('tbody');
+            let draggedIndex = -1;
+
             data.forEach((row, index) => {
                 const tr = document.createElement('tr');
+                tr.draggable = true;
+                tr.dataset.index = index;
+                
+                const tdDrag = document.createElement('td');
+                tdDrag.className = 'py-1 px-2 border-b text-center text-gray-400 cursor-grab hover:text-gray-600';
+                tdDrag.innerHTML = '≡';
+                tr.appendChild(tdDrag);
+
+                tr.addEventListener('dragstart', (e) => {
+                    draggedIndex = index;
+                    e.dataTransfer.effectAllowed = 'move';
+                    setTimeout(() => tr.classList.add('opacity-50'), 0);
+                });
+
+                tr.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    tr.classList.add('bg-blue-50');
+                });
+
+                tr.addEventListener('dragleave', () => {
+                    tr.classList.remove('bg-blue-50');
+                });
+
+                tr.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    tr.classList.remove('bg-blue-50');
+                    if (draggedIndex === -1 || draggedIndex === index) return;
+                    
+                    const targetIndex = index;
+                    const items = mastersData[currentTab];
+                    const item = items.splice(draggedIndex, 1)[0];
+                    items.splice(targetIndex, 0, item);
+                    
+                    renderTable();
+                });
+
+                tr.addEventListener('dragend', () => {
+                    tr.classList.remove('opacity-50');
+                    draggedIndex = -1;
+                });
+
                 schema.forEach(col => {
                     const td = document.createElement('td');
                     td.className = 'py-1 px-2 border-b';
                     const input = document.createElement('input');
-                    input.type = col.includes('color') ? 'color' : 'text';
+                    if (col.includes('color')) {
+                        input.type = 'color';
+                    } else if (col.includes('date') || col.includes('deadline')) {
+                        input.type = 'date';
+                    } else {
+                        input.type = 'text';
+                    }
                     input.value = row[col] || '';
                     input.className = 'w-full border p-1 rounded';
                     input.onchange = (e) => {
@@ -100,7 +154,7 @@
                 tdAction.className = 'py-1 px-2 border-b';
                 const delBtn = document.createElement('button');
                 delBtn.textContent = '削除';
-                delBtn.className = 'bg-red-500 text-white px-2 py-1 rounded text-xs';
+                delBtn.className = 'bg-red-500 hover:bg-red-600 text-white px-3 py-1 rounded text-xs font-bold';
                 delBtn.onclick = () => {
                     mastersData[currentTab].splice(index, 1);
                     renderTable();
