@@ -157,6 +157,11 @@ body, html {
     pointer-events: none;
 }
 
+.filtered-out {
+    opacity: 0.2;
+    pointer-events: none !important;
+}
+
 /* 印刷用 */
 @media print {
     header, #side-panel, #context-menu, #unsaved-badge {

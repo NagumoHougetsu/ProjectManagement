@@ -221,6 +221,29 @@ async function fetchMasters() {
             if (Array.from(filterSel.options).some(o => o.value === currentVal)) filterSel.value = currentVal;
         }
     }
+    if (masters.member) {
+        const filterMemberList = document.getElementById('filter-member-list');
+        if (filterMemberList) {
+            // 現在のチェック状態を保存（あれば）
+            const currentSelected = window.getSelectedMembers ? window.getSelectedMembers() : [];
+            
+            filterMemberList.innerHTML = masters.member.map(m => `
+                <label class="flex items-center space-x-2 px-2 py-1 hover:bg-gray-100 rounded cursor-pointer member-filter-item">
+                    <input type="checkbox" class="member-filter-cb" value="${m.member_id}" data-name="${m.member_name}" ${currentSelected.includes(m.member_id) ? 'checked' : ''}>
+                    <span>${m.member_name}</span>
+                </label>
+            `).join('');
+
+            // イベントリスナーの再設定
+            document.querySelectorAll('.member-filter-cb').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    updateMemberFilterText();
+                    renderGantt();
+                });
+            });
+            updateMemberFilterText();
+        }
+    }
 }
 
 async function fetchTasks() {
@@ -229,6 +252,27 @@ async function fetchTasks() {
     const uniqueMap = new Map();
     tasks.forEach(t => uniqueMap.set(t.task_id, t));
     allTasksRaw = Array.from(uniqueMap.values());
+}
+
+// メンバーフィルター用ヘルパー
+window.getSelectedMembers = function() {
+    const cbs = document.querySelectorAll('.member-filter-cb:checked');
+    return Array.from(cbs).map(cb => cb.value);
+};
+
+function updateMemberFilterText() {
+    const selected = window.getSelectedMembers();
+    const btnText = document.getElementById('filter-member-text');
+    if (!btnText) return;
+    
+    if (selected.length === 0) {
+        btnText.textContent = '担当者(全て)';
+    } else if (selected.length === 1) {
+        const cb = document.querySelector(`.member-filter-cb[value="${selected[0]}"]`);
+        btnText.textContent = cb ? cb.getAttribute('data-name') : '1人選択';
+    } else {
+        btnText.textContent = `${selected.length}人選択`;
+    }
 }
 
 async function fetchDeadlines() {
@@ -543,7 +587,41 @@ function renderTasks() {
     const margin = 4 * ganttConfig.uiScale;
 
     const laneStacks = {};
-    const sortedTasks = [...allTasksRaw].sort((a, b) => moment(a.start_date).diff(moment(b.start_date)));
+    // フィルターの取得
+    const filterTextElem = document.getElementById('filter-text');
+    const filterQuery = filterTextElem && filterTextElem.value.trim() !== '' ? filterTextElem.value.trim().toLowerCase() : '';
+    
+    // TODO: カスタムの担当者マルチセレクトからの選択値取得
+    // 一旦既存の単一選択をサポートしつつ、後で配列対応する
+    const filterMemberElem = document.getElementById('filter-member');
+    const selectedMembers = window.getSelectedMembers ? window.getSelectedMembers() : (filterMemberElem && filterMemberElem.value ? [filterMemberElem.value] : []);
+    
+    const filterHideCompletedElem = document.getElementById('filter-hide-completed');
+    const hideCompleted = filterHideCompletedElem && filterHideCompletedElem.checked;
+
+    // タスクのフィルタリング
+    const filteredTasks = allTasksRaw.filter(t => {
+        // 完了済み非表示
+        if (hideCompleted && parseInt(t.progress) === 100) return false;
+        
+        // 担当者フィルター（複数選択）
+        if (selectedMembers.length > 0 && !selectedMembers.includes(t.member_id)) return false;
+        
+        // テキスト検索（全項目部分一致）
+        if (filterQuery !== '') {
+            const charName = t.char_id ? getMasterItem('character', 'char_id', t.char_id)?.char_name || '' : '';
+            const relName = t.release_id ? getMasterItem('release', 'release_id', t.release_id)?.release_name || '' : '';
+            const memberName = t.member_id ? getMasterItem('member', 'member_id', t.member_id)?.member_name || '' : '';
+            const sectionName = t.section_id ? getMasterItem('section', 'section_id', t.section_id)?.section_name || '' : '';
+            
+            const searchTarget = `${t.task_name} ${charName} ${relName} ${memberName} ${sectionName}`.toLowerCase();
+            if (!searchTarget.includes(filterQuery)) return false;
+        }
+        
+        return true;
+    });
+
+    const sortedTasks = [...filteredTasks].sort((a, b) => moment(a.start_date).diff(moment(b.start_date)));
 
     sortedTasks.forEach(t => {
         const lane = t.lane || '1';
@@ -596,7 +674,7 @@ function renderTasks() {
 
     const parentGroups = ganttConfig.groups.filter(g => g.type === 'release' || g.type === 'character');
     parentGroups.forEach(g => {
-        const childTasks = allTasksRaw.filter(t => {
+        const childTasks = filteredTasks.filter(t => {
             if (g.type === 'release') return t.release_id === g.raw.release_id;
             if (g.type === 'character') return t.release_id === g.parentId && t.char_id === g.raw.char_id;
             return false;
@@ -664,7 +742,7 @@ function renderTasks() {
         const artDeadline = rel.art_deadline;
         if (!artDeadline) return;
 
-        const charTasks = allTasksRaw.filter(t => t.release_id === g.parentId && t.char_id === g.raw.char_id);
+        const charTasks = filteredTasks.filter(t => t.release_id === g.parentId && t.char_id === g.raw.char_id);
         const activeSectionIds = new Set(charTasks.map(t => t.section_id));
 
         // 対象キャラクターグループの表示領域（Y座標と高さ）を計算
@@ -1128,6 +1206,28 @@ function updateEventDisplay(releaseId) {
     }
 }
 
+function validateTaskEditor() {
+    const type = document.getElementById('edit-group-type').value;
+    const btnApply = document.getElementById('btn-apply-task');
+    if (type !== 'task') {
+        btnApply.disabled = false;
+        return;
+    }
+
+    const rel = document.getElementById('edit-release').value;
+    const char = document.getElementById('edit-character').value;
+    const sec = document.getElementById('edit-section').value;
+    const taskName = document.getElementById('edit-task-name').value;
+    const start = document.getElementById('edit-start').value;
+    const end = document.getElementById('edit-end').value;
+
+    if (!rel || !char || !sec || !taskName || !start || !end) {
+        btnApply.disabled = true;
+    } else {
+        btnApply.disabled = false;
+    }
+}
+
 function openEditor(data, type = 'task') {
     populateDropdowns();
     document.getElementById('edit-group-type').value = type;
@@ -1177,6 +1277,7 @@ function openEditor(data, type = 'task') {
     }
 
     document.getElementById('side-panel').classList.remove('translate-x-full');
+    validateTaskEditor();
 }
 
 function openEditorNew(groupId, dateObj) {
@@ -1253,6 +1354,16 @@ function populateDropdowns() {
 }
 
 function setupMiscEvents() {
+    // フォームバリデーション用のイベント登録
+    const editFields = ['edit-release', 'edit-character-name', 'edit-character-costume', 'edit-section', 'edit-task-name', 'edit-member', 'edit-start', 'edit-end', 'edit-progress'];
+    editFields.forEach(id => {
+        const el = document.getElementById(id);
+        if(el) {
+            el.addEventListener('change', validateTaskEditor);
+            el.addEventListener('input', validateTaskEditor);
+        }
+    });
+
     document.getElementById('edit-character-name').addEventListener('change', (e) => {
         const selectedName = e.target.value;
         const costumeSel = document.getElementById('edit-character-costume');
@@ -1390,6 +1501,53 @@ function setupMiscEvents() {
     });
 
     document.getElementById('filter-section').addEventListener('change', () => {
+        renderGantt();
+    });
+    
+    document.getElementById('filter-text').addEventListener('input', () => {
+        renderGantt();
+    });
+
+    // カスタムメンバーフィルターのUI制御
+    const filterMemberBtn = document.getElementById('filter-member-btn');
+    const filterMemberDropdown = document.getElementById('filter-member-dropdown');
+    const filterMemberSearch = document.getElementById('filter-member-search');
+
+    if (filterMemberBtn) {
+        filterMemberBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            filterMemberDropdown.classList.toggle('hidden');
+            if (!filterMemberDropdown.classList.contains('hidden')) {
+                filterMemberSearch.focus();
+            }
+        });
+    }
+
+    if (filterMemberSearch) {
+        filterMemberSearch.addEventListener('input', (e) => {
+            const term = e.target.value.trim().toLowerCase();
+            document.querySelectorAll('.member-filter-item').forEach(item => {
+                const cb = item.querySelector('.member-filter-cb');
+                const name = cb.getAttribute('data-name').toLowerCase();
+                if (name.includes(term)) {
+                    item.style.display = '';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+    }
+
+    // ドロップダウンの外をクリックしたら閉じる
+    document.addEventListener('click', (e) => {
+        if (filterMemberDropdown && !filterMemberDropdown.classList.contains('hidden')) {
+            if (!e.target.closest('#filter-member-container')) {
+                filterMemberDropdown.classList.add('hidden');
+            }
+        }
+    });
+
+    document.getElementById('filter-hide-completed').addEventListener('change', () => {
         renderGantt();
     });
     

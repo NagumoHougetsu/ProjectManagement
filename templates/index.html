@@ -27,8 +27,35 @@
                     <option value="">全セクション表示</option>
                 </select>
             </div>
+            <!-- 検索フィルターUI -->
+            <div class="flex items-center space-x-2 ml-4 bg-blue-700 p-2 rounded">
+                <div class="flex items-center">
+                    <span class="mr-1">🔍</span>
+                    <input type="text" id="filter-text" class="text-black px-2 py-1 rounded border w-40" placeholder="タスク・キャラ名">
+                </div>
+                <div class="flex items-center relative" id="filter-member-container">
+                    <span class="mr-1">👤</span>
+                    <button id="filter-member-btn" class="bg-white text-black px-2 py-1 rounded border w-40 text-left flex justify-between items-center whitespace-nowrap overflow-hidden">
+                        <span id="filter-member-text" class="truncate">担当者(全て)</span>
+                        <span class="text-xs ml-1">▼</span>
+                    </button>
+                    <!-- マルチセレクト用ドロップダウン -->
+                    <div id="filter-member-dropdown" class="hidden absolute top-full mt-1 left-4 w-48 bg-white text-black border rounded shadow-lg z-50 flex flex-col max-h-64">
+                        <div class="p-1 border-b">
+                            <input type="text" id="filter-member-search" class="w-full px-2 py-1 border rounded text-sm" placeholder="名前を検索...">
+                        </div>
+                        <div id="filter-member-list" class="flex-1 overflow-y-auto p-1 space-y-1 text-sm">
+                            <!-- JSで生成されるチェックボックス -->
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center ml-2">
+                    <input type="checkbox" id="filter-hide-completed" class="mr-1 w-4 h-4 rounded cursor-pointer">
+                    <label for="filter-hide-completed" class="text-sm font-bold cursor-pointer flex items-center">完了非表示</label>
+                </div>
+            </div>
         </div>
-        <div class="flex space-x-4">
+        <div class="flex space-x-4 items-center">
             <span id="unsaved-badge" class="bg-red-500 text-white px-3 py-1 rounded hidden font-bold mt-1">未保存の変更あり</span>
             <button id="btn-undo" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded transition disabled:opacity-50" disabled>取り消し</button>
             <button id="btn-redo" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded transition disabled:opacity-50" disabled>やり直し</button>
@@ -132,7 +159,7 @@
             </div>
             <div class="p-4 bg-gray-100 border-t flex justify-end space-x-2">
                 <button id="btn-delete-task" class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 hidden">削除</button>
-                <button id="btn-apply-task" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">適用</button>
+                <button id="btn-apply-task" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed">適用</button>
             </div>
         </div>
         
