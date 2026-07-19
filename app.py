@@ -164,7 +164,7 @@ def save_tasks():
         # 既存のタスクCSVをクリアするか上書きする処理
         # ここでは受け取ったデータをS_xxx別に分けて t_tasks_xxx.csv に上書きする
         # （簡易的に section_id をそのままファイル名に利用）
-        fieldnames = ['task_id', 'release_id', 'char_id', 'section_id', 'task_name', 'member_id', 'start_date', 'end_date', 'progress', 'lane']
+        fieldnames = ['task_id', 'release_id', 'char_id', 'section_id', 'task_name', 'member_id', 'start_date', 'end_date', 'progress', 'lane', 'dependencies']
         for sec_id, tasks in tasks_by_section.items():
             filepath = os.path.join(p_dir, f't_tasks_{sec_id}.csv')
             write_dicts_to_csv(filepath, fieldnames, tasks)

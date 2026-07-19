@@ -245,3 +245,40 @@ body, html {
     font-style: italic;
     margin-bottom: 0.6em;
 }
+
+/* 依存関係（コネクタ・線）のスタイル */
+.gantt-task-item .gantt-dependency-connector {
+    position: absolute;
+    right: -6px;
+    top: calc(50% - 7px);
+    width: 14px;
+    height: 14px;
+    background-color: #ef4444;
+    color: white;
+    border-radius: 9999px;
+    font-size: 10px;
+    line-height: 14px;
+    text-align: center;
+    cursor: crosshair;
+    z-index: 30;
+    opacity: 0;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    user-select: none;
+    font-weight: bold;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.gantt-task-item:hover .gantt-dependency-connector {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+.gantt-dependency-connector:hover {
+    background-color: #dc2626 !important;
+    transform: scale(1.3) !important;
+}
+
+/* 接続される側のターゲットとなるハイライトスタイルなど */
+.gantt-task-item.dependency-target-hover {
+    box-shadow: 0 0 0 3px #10b981 !important; /* ドロップ先のハイライト：緑 */
+}

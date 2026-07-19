@@ -45,6 +45,7 @@ const els = {
     ganttRows: document.getElementById('gantt-rows'),
     ganttTasks: document.getElementById('gantt-tasks'),
     ganttProgressLine: document.getElementById('gantt-progress-line'),
+    ganttDependencyLines: document.getElementById('gantt-dependency-lines'),
     crosshairCol: document.getElementById('gantt-crosshair-col'),
     crosshairRow: document.getElementById('gantt-crosshair-row'),
     unsavedBadge: document.getElementById('unsaved-badge'),
@@ -57,6 +58,8 @@ let lastMouseTime = null;
 let lastMouseGroup = null;
 let currentHoverDate = null;
 let currentHoverGroup = null;
+let dependencyDragSourceId = null;
+let dependencyDragCurrentPos = null;
 let insertTargetIndex = -1; // 新規タスク挿入位置
 
 // --- Initialization ---
@@ -414,11 +417,15 @@ function renderGantt() {
     els.ganttRows.style.width = `${totalWidth}px`;
     els.ganttTasks.style.width = `${totalWidth}px`;
     els.ganttBodyContent.style.width = `${totalWidth}px`;
+    if (els.ganttDependencyLines) {
+        els.ganttDependencyLines.style.width = `${totalWidth}px`;
+    }
 
     buildGroupsList();
     renderHeaderAndGrid(totalWidth);
     renderRows();
     renderTasks();
+    renderDependencyLines();
     renderProgressLine();
 }
 
@@ -739,6 +746,7 @@ function renderTasks() {
                 <div class="gantt-task-name">${t.task_name}</div>
                 <div class="gantt-resize-handle gantt-resize-handle-left" data-action="resize-left"></div>
                 <div class="gantt-resize-handle gantt-resize-handle-right" data-action="resize-right"></div>
+                <div class="gantt-dependency-connector" data-action="connect-dependency" title="ドラッグして他のタスクの左端に繋ぐ">＋</div>
             </div>
         `;
     });
@@ -865,6 +873,104 @@ function renderTasks() {
     });
 
     els.ganttTasks.innerHTML = html;
+}
+
+function renderDependencyLines() {
+    const svg = els.ganttDependencyLines;
+    if (!svg) return;
+    
+    // SVG内部をクリア
+    svg.innerHTML = '';
+    
+    // 矢印マーカー（Defs）の追加
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+        defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        defs.innerHTML = `
+            <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#3b82f6" />
+            </marker>
+        `;
+        svg.appendChild(defs);
+    }
+
+    // タスク要素の位置をマッピング
+    const taskItems = document.querySelectorAll('.gantt-task-item');
+    const taskCoords = {};
+    taskItems.forEach(el => {
+        const id = el.getAttribute('data-task-id');
+        const rect = {
+            left: parseFloat(el.style.left) || 0,
+            top: parseFloat(el.style.top) || 0,
+            width: parseFloat(el.style.width) || 0,
+            height: parseFloat(el.style.height) || 0
+        };
+        taskCoords[id] = {
+            left: { x: rect.left, y: rect.top + rect.height / 2 },
+            right: { x: rect.left + rect.width, y: rect.top + rect.height / 2 }
+        };
+    });
+
+    // 既存の依存関係線を描画
+    currentFilteredTasks.forEach(t => {
+        if (!t.dependencies) return;
+        const depIds = t.dependencies.split(/[,;]/).map(s => s.trim()).filter(s => s);
+        depIds.forEach(depId => {
+            const fromCoord = taskCoords[depId];
+            const toCoord = taskCoords[t.task_id];
+            if (fromCoord && toCoord) {
+                // 先行タスクの右端 -> 後続タスクの左端
+                drawDependencyPath(svg, fromCoord.right, toCoord.left, depId, t.task_id);
+            }
+        });
+    });
+
+    // ドラッグ中のプレビュー線を描画
+    if (dependencyDragSourceId && dependencyDragCurrentPos) {
+        const fromCoord = taskCoords[dependencyDragSourceId];
+        if (fromCoord) {
+            drawDependencyPath(svg, fromCoord.right, dependencyDragCurrentPos, dependencyDragSourceId, null, true);
+        }
+    }
+}
+
+function drawDependencyPath(svg, p1, p2, fromId, toId, isPreview = false) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    
+    // コントロールポイントの計算（なだらかなベジェ曲線）
+    const dx = Math.abs(p2.x - p1.x);
+    const cx1 = p1.x + Math.min(dx * 0.4, 40);
+    const cy1 = p1.y;
+    const cx2 = p2.x - Math.min(dx * 0.4, 40);
+    const cy2 = p2.y;
+    
+    const d = `M ${p1.x} ${p1.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${p2.x} ${p2.y}`;
+    
+    path.setAttribute("d", d);
+    if (isPreview) {
+        path.setAttribute("stroke", "#ef4444"); // ドラッグ中は赤色破線
+        path.setAttribute("stroke-width", "2");
+        path.setAttribute("stroke-dasharray", "4,4");
+    } else {
+        path.setAttribute("stroke", "#3b82f6"); // 通常は青色
+        path.setAttribute("stroke-width", "2");
+    }
+    path.setAttribute("fill", "none");
+    path.setAttribute("marker-end", "url(#arrow)");
+    
+    if (!isPreview) {
+        path.setAttribute("class", "gantt-dependency-line pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[3px] transition-colors duration-150");
+        path.setAttribute("data-from", fromId);
+        path.setAttribute("data-to", toId);
+        
+        path.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showDependencyLineContextMenu(e, fromId, toId);
+        });
+    }
+    
+    svg.appendChild(path);
 }
 
 function renderProgressLine() {
@@ -1033,6 +1139,42 @@ function setupMouseTracking() {
         if (e.target.closest('.gantt-task-item') || e.target.closest('.gantt-resize-handle') || e.target.closest('.gantt-deadline-marker')) return;
         if (e.button !== 0) return;
         
+        if (e.shiftKey || e.ctrlKey || e.metaKey) {
+            const rect = els.ganttBodyContent.getBoundingClientRect();
+            const startX = e.clientX - rect.left;
+            const startY = e.clientY - rect.top;
+            
+            dragState.isDragging = true;
+            dragState.mode = 'select-rect';
+            dragState.startX = e.clientX;
+            dragState.startY = e.clientY;
+            dragState.selectRectStart = { x: startX, y: startY };
+            
+            let selRect = document.getElementById('gantt-selection-rect');
+            if (!selRect) {
+                selRect = document.createElement('div');
+                selRect.id = 'gantt-selection-rect';
+                selRect.style.position = 'absolute';
+                selRect.style.border = '1px dashed #3b82f6';
+                selRect.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
+                selRect.style.pointerEvents = 'none';
+                selRect.style.zIndex = '1000';
+                els.ganttBodyContent.appendChild(selRect);
+            }
+            selRect.style.left = `${startX}px`;
+            selRect.style.top = `${startY}px`;
+            selRect.style.width = '0px';
+            selRect.style.height = '0px';
+            selRect.style.display = 'block';
+            
+            if (!e.ctrlKey && !e.metaKey) {
+                selectedTaskIds.clear();
+                document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
+            }
+            document.body.classList.add('select-none');
+            return;
+        }
+        
         panState.isPanning = true;
         panState.startX = e.clientX;
         panState.startY = e.clientY;
@@ -1144,6 +1286,35 @@ function setupMouseTracking() {
     els.ganttTasks.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         
+        const connector = e.target.closest('.gantt-dependency-connector');
+        if (connector) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const taskEl = connector.closest('.gantt-task-item');
+            if (!taskEl) return;
+            const taskId = taskEl.getAttribute('data-task-id');
+            
+            dependencyDragSourceId = taskId;
+            
+            const rect = els.ganttBodyContent.getBoundingClientRect();
+            dependencyDragCurrentPos = {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+            
+            dragState.isDragging = true;
+            dragState.mode = 'connect-dependency';
+            dragState.startX = e.clientX;
+            dragState.startY = e.clientY;
+            
+            document.body.style.cursor = 'crosshair';
+            document.body.classList.add('select-none');
+            
+            renderDependencyLines();
+            return;
+        }
+
         const deadlineMarker = e.target.closest('.gantt-deadline-marker');
         if (deadlineMarker) {
             e.preventDefault(); // ネイティブドラッグを防止
@@ -1268,15 +1439,70 @@ function setupMouseTracking() {
         }
 
         if (!dragState.isDragging) return;
+
+        if (dragState.mode === 'select-rect') {
+            const rect = els.ganttBodyContent.getBoundingClientRect();
+            const curX = e.clientX - rect.left;
+            const curY = e.clientY - rect.top;
+            
+            const startX = dragState.selectRectStart.x;
+            const startY = dragState.selectRectStart.y;
+            
+            const left = Math.min(startX, curX);
+            const top = Math.min(startY, curY);
+            const width = Math.abs(startX - curX);
+            const height = Math.abs(startY - curY);
+            
+            const selRect = document.getElementById('gantt-selection-rect');
+            if (selRect) {
+                selRect.style.left = `${left}px`;
+                selRect.style.top = `${top}px`;
+                selRect.style.width = `${width}px`;
+                selRect.style.height = `${height}px`;
+            }
+            
+            const taskItems = document.querySelectorAll('.gantt-task-item');
+            taskItems.forEach(el => {
+                const id = el.getAttribute('data-task-id');
+                const tLeft = parseFloat(el.style.left) || 0;
+                const tTop = parseFloat(el.style.top) || 0;
+                const tWidth = parseFloat(el.style.width) || 0;
+                const tHeight = parseFloat(el.style.height) || 0;
+                
+                const intersect = (left < tLeft + tWidth && left + width > tLeft &&
+                                   top < tTop + tHeight && top + height > tTop);
+                                  
+                if (intersect) {
+                    selectedTaskIds.add(id);
+                    el.classList.add('selected');
+                } else {
+                    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                        selectedTaskIds.delete(id);
+                        el.classList.remove('selected');
+                    }
+                }
+            });
+            return;
+        }
         
         const dx = e.clientX - dragState.startX;
         const dy = e.clientY - dragState.startY;
         
         if (dragState.mode === 'move') {
+            const movingIds = new Set(dragState.selectedTasks.map(st => st.id));
             dragState.selectedTasks.forEach(st => {
                 const rawLeft = st.initialLeft + dx;
                 const rawTop = st.initialTop + dy;
-                const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
+                let snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
+                
+                const minStartLimit = getMinStartLimit(st.id, movingIds);
+                if (minStartLimit) {
+                    const minStartX = dateToX(minStartLimit.clone().add(1, 'days'));
+                    if (snappedLeft < minStartX) {
+                        snappedLeft = minStartX;
+                    }
+                }
+                
                 st.element.style.left = `${snappedLeft}px`;
                 st.element.style.top = `${rawTop}px`;
             });
@@ -1305,13 +1531,39 @@ function setupMouseTracking() {
             dragState.element.style.width = `${snappedWidth}px`;
         } else if (dragState.mode === 'resize-left') {
             const rawLeft = dragState.initialLeft + dx;
-            const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
+            let snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
+            
+            const minStartLimit = getMinStartLimit(dragState.taskId);
+            if (minStartLimit) {
+                const minStartX = dateToX(minStartLimit.clone().add(1, 'days'));
+                if (snappedLeft < minStartX) {
+                    snappedLeft = minStartX;
+                }
+            }
+            
             const rightEdge = dragState.initialLeft + dragState.initialWidth;
             const snappedWidth = Math.max(ganttConfig.dayWidth, rightEdge - snappedLeft);
-            // 右端を固定して左端を動かすので、左端のスナップ位置に合わせて幅も再計算する
             const actualLeft = rightEdge - snappedWidth;
             dragState.element.style.width = `${snappedWidth}px`;
             dragState.element.style.left = `${actualLeft}px`;
+        } else if (dragState.mode === 'connect-dependency') {
+            const rect = els.ganttBodyContent.getBoundingClientRect();
+            dependencyDragCurrentPos = {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top
+            };
+            
+            const hoverTarget = findDependencyTarget(e.clientX, e.clientY);
+            
+            document.querySelectorAll('.gantt-task-item').forEach(el => {
+                el.classList.remove('dependency-target-hover');
+            });
+            if (hoverTarget && hoverTarget !== dependencyDragSourceId) {
+                const targetEl = document.querySelector(`.gantt-task-item[data-task-id="${hoverTarget}"]`);
+                if (targetEl) targetEl.classList.add('dependency-target-hover');
+            }
+            
+            renderDependencyLines();
         }
     });
 
@@ -1323,6 +1575,36 @@ function setupMouseTracking() {
         }
 
         if (!dragState.isDragging) return;
+
+        if (dragState.mode === 'select-rect') {
+            const selRect = document.getElementById('gantt-selection-rect');
+            if (selRect) {
+                selRect.style.display = 'none';
+            }
+            dragState.isDragging = false;
+            document.body.classList.remove('select-none');
+            return;
+        }
+
+        if (dragState.mode === 'connect-dependency') {
+            const targetId = findDependencyTarget(e.clientX, e.clientY);
+            
+            document.querySelectorAll('.gantt-task-item').forEach(el => {
+                el.classList.remove('dependency-target-hover');
+            });
+            
+            if (targetId && targetId !== dependencyDragSourceId) {
+                addDependency(dependencyDragSourceId, targetId);
+            }
+            
+            dependencyDragSourceId = null;
+            dependencyDragCurrentPos = null;
+            dragState.isDragging = false;
+            document.body.style.cursor = '';
+            document.body.classList.remove('select-none');
+            renderDependencyLines();
+            return;
+        }
         
         try {
             const dx = Math.abs(e.clientX - dragState.startX);
@@ -1468,37 +1750,42 @@ function setupMouseTracking() {
             }
 
             if (dragState.selectedTasks && dragState.selectedTasks.length > 0) {
-            saveHistory();
-            
-            dragState.selectedTasks.forEach(st => {
-                const raw = allTasksRaw.find(t => t.task_id === st.id);
-                if (!raw) return;
+                saveHistory();
                 
-                const finalLeft = parseFloat(st.element.style.left);
-                const finalWidth = parseFloat(st.element.style.width);
-                const finalTop = parseFloat(st.element.style.top);
-                
-                const newStartM = xToDate(finalLeft).startOf('day');
-                const newEndM = xToDate(finalLeft + finalWidth).subtract(1, 'milliseconds').startOf('day');
-                
-                raw.start_date = newStartM.format('YYYY-MM-DD');
-                raw.end_date = newEndM.format('YYYY-MM-DD');
-                
-                if (dragState.mode === 'move') {
-                    const centerTop = finalTop + (24 * ganttConfig.uiScale) / 2;
-                    const rowIndex = Math.floor(centerTop / ganttConfig.rowHeight);
-                    if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
-                        const targetGroup = ganttConfig.groups[rowIndex];
-                        if (targetGroup.type === 'lane') {
-                            const parts = targetGroup.id.split('_');
-                            if (parts.length >= 4) {
-                                raw.release_id = parts[0] + '_' + parts[1];
-                                raw.char_id = parts[2] + '_' + parts[3];
-                                raw.lane = parts[4] ? parts[4].replace('LANE', '') : '1';
+                dragState.selectedTasks.forEach(st => {
+                    const raw = allTasksRaw.find(t => t.task_id === st.id);
+                    if (!raw) return;
+                    
+                    const finalLeft = parseFloat(st.element.style.left);
+                    const finalWidth = parseFloat(st.element.style.width);
+                    const finalTop = parseFloat(st.element.style.top);
+                    
+                    const newStartM = xToDate(finalLeft).startOf('day');
+                    const newEndM = xToDate(finalLeft + finalWidth).subtract(1, 'milliseconds').startOf('day');
+                    
+                    raw.start_date = newStartM.format('YYYY-MM-DD');
+                    raw.end_date = newEndM.format('YYYY-MM-DD');
+                    
+                    if (dragState.mode === 'move') {
+                        const centerTop = finalTop + (24 * ganttConfig.uiScale) / 2;
+                        const rowIndex = Math.floor(centerTop / ganttConfig.rowHeight);
+                        if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
+                            const targetGroup = ganttConfig.groups[rowIndex];
+                            if (targetGroup.type === 'lane') {
+                                const parts = targetGroup.id.split('_');
+                                if (parts.length >= 4) {
+                                    raw.release_id = parts[0] + '_' + parts[1];
+                                    raw.char_id = parts[2] + '_' + parts[3];
+                                    raw.lane = parts[4] ? parts[4].replace('LANE', '') : '1';
+                                }
                             }
                         }
                     }
-                    }
+                });
+                
+                // ドラッグ移動/リサイズ完了後に、再帰的に後続タスクを押し出す
+                dragState.selectedTasks.forEach(st => {
+                    pushSuccessorsRecursive(st.id);
                 });
                 
                 markUnsaved();
@@ -3165,6 +3452,183 @@ function pasteTask(targetGroup, targetTime) {
     allTasksRaw.push(newRaw);
     markUnsaved();
     renderGantt();
+}
+
+function findDependencyTarget(clientX, clientY) {
+    const items = document.querySelectorAll('.gantt-task-item');
+    let bestTargetId = null;
+    let minDistance = 50;
+    
+    items.forEach(el => {
+        const id = el.getAttribute('data-task-id');
+        if (id === dependencyDragSourceId) return;
+        
+        const rect = el.getBoundingClientRect();
+        const targetX = rect.left;
+        const targetY = rect.top + rect.height / 2;
+        
+        const distance = Math.hypot(clientX - targetX, clientY - targetY);
+        const isOnTask = (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom);
+        
+        if (isOnTask) {
+            bestTargetId = id;
+            minDistance = 0;
+        } else if (distance < minDistance) {
+            minDistance = distance;
+            bestTargetId = id;
+        }
+    });
+    
+    return bestTargetId;
+}
+
+function addDependency(fromId, toId) {
+    saveHistory();
+
+    const task = allTasksRaw.find(t => t.task_id === toId);
+    if (!task) return;
+    
+    let deps = task.dependencies ? task.dependencies.split(/[,;]/).map(s => s.trim()).filter(s => s) : [];
+    
+    if (deps.includes(fromId)) return;
+    if (isCircularDependency(toId, fromId)) {
+        alert("循環依存（お互い、または輪のように先行後続が巡る構造）になるため、結線できません。");
+        return;
+    }
+    
+    deps.push(fromId);
+    task.dependencies = deps.join(',');
+    
+    markUnsaved();
+    renderGantt();
+}
+
+function isCircularDependency(sourceId, targetId, visited = new Set()) {
+    if (targetId === sourceId) return true;
+    if (visited.has(targetId)) return false;
+    
+    visited.add(targetId);
+    
+    const task = allTasksRaw.find(t => t.task_id === targetId);
+    if (!task || !task.dependencies) return false;
+    
+    const deps = task.dependencies.split(/[,;]/).map(s => s.trim()).filter(s => s);
+    for (const depId of deps) {
+        if (isCircularDependency(sourceId, depId, visited)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+let currentDependencyContext = null;
+
+function showDependencyLineContextMenu(e, fromId, toId) {
+    currentDependencyContext = { fromId, toId };
+    
+    const menu = document.getElementById('dependency-context-menu');
+    if (!menu) {
+        const div = document.createElement('div');
+        div.id = 'dependency-context-menu';
+        div.className = 'fixed bg-white border border-gray-300 rounded shadow-lg py-1 text-sm hidden';
+        div.style.zIndex = '30000';
+        div.innerHTML = `
+            <button id="btn-delete-dependency" class="w-full text-left px-4 py-2 hover:bg-red-500 hover:text-white flex items-center space-x-2">
+                <span>❌</span>
+                <span>この依存関係（線を消す）</span>
+            </button>
+        `;
+        document.body.appendChild(div);
+        
+        document.getElementById('btn-delete-dependency').addEventListener('click', () => {
+            if (currentDependencyContext) {
+                removeDependency(currentDependencyContext.fromId, currentDependencyContext.toId);
+                currentDependencyContext = null;
+            }
+            div.classList.add('hidden');
+        });
+    }
+    
+    const menuEl = document.getElementById('dependency-context-menu');
+    menuEl.style.left = `${e.clientX}px`;
+    menuEl.style.top = `${e.clientY}px`;
+    menuEl.classList.remove('hidden');
+    
+    const closeMenu = (event) => {
+        if (!event.target.closest('#dependency-context-menu')) {
+            menuEl.classList.add('hidden');
+            document.removeEventListener('click', closeMenu);
+        }
+    };
+    setTimeout(() => {
+        document.addEventListener('click', closeMenu);
+    }, 10);
+}
+
+function removeDependency(fromId, toId) {
+    saveHistory();
+    const task = allTasksRaw.find(t => t.task_id === toId);
+    if (!task || !task.dependencies) return;
+    
+    let deps = task.dependencies.split(/[,;]/).map(s => s.trim()).filter(s => s);
+    deps = deps.filter(id => id !== fromId);
+    
+    task.dependencies = deps.join(',');
+    
+    markUnsaved();
+    renderGantt();
+}
+
+function getMinStartLimit(taskId, excludeIds = new Set()) {
+    const task = allTasksRaw.find(t => t.task_id === taskId);
+    if (!task || !task.dependencies) return null;
+    
+    const depIds = task.dependencies.split(/[,;]/).map(s => s.trim()).filter(s => s);
+    let maxEndDate = null;
+    
+    depIds.forEach(depId => {
+        if (excludeIds.has(depId)) return;
+        const depTask = allTasksRaw.find(t => t.task_id === depId);
+        if (depTask) {
+            const endM = moment(depTask.end_date);
+            if (!maxEndDate || endM.isAfter(maxEndDate)) {
+                maxEndDate = endM;
+            }
+        }
+    });
+    
+    return maxEndDate;
+}
+
+function pushSuccessorsRecursive(predecessorId) {
+    const predTask = allTasksRaw.find(t => t.task_id === predecessorId);
+    if (!predTask) return;
+    
+    const predEnd = moment(predTask.end_date);
+    
+    const successorTasks = allTasksRaw.filter(t => {
+        if (!t.dependencies) return false;
+        const depIds = t.dependencies.split(/[,;]/).map(s => s.trim());
+        return depIds.includes(predecessorId);
+    });
+    
+    successorTasks.forEach(succTask => {
+        const succStart = moment(succTask.start_date);
+        
+        // 後続タスクの開始日が先行の終了日以前（または終了日と同日）の場合、押し出す
+        if (succStart.isBefore(predEnd.clone().add(1, 'days'))) {
+            const succDuration = moment(succTask.end_date).diff(succStart, 'days');
+            const newStart = predEnd.clone().add(1, 'days');
+            const newEnd = newStart.clone().add(succDuration, 'days');
+            
+            succTask.start_date = newStart.format('YYYY-MM-DD');
+            succTask.end_date = newEnd.format('YYYY-MM-DD');
+            
+            // 後続タスクも再帰的に押し出す
+            pushSuccessorsRecursive(succTask.task_id);
+        }
+    });
 }
 
 init();
