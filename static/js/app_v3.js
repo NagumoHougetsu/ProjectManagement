@@ -788,14 +788,14 @@ function renderTasks() {
         
         let barClass = '';
         if (g.type === 'release') barClass = 'bg-gray-700 text-white font-bold';
-        else if (g.type === 'character') barClass = 'bg-gray-400 text-black font-bold';
+        else if (g.type === 'character') barClass = 'bg-gray-400 text-black font-bold gantt-group-bar-character';
 
         html += `
-            <div class="absolute flex items-center px-2 rounded shadow cursor-pointer ${barClass}" 
-                 style="left:${x}px; top:${taskTop}px; width:${width}px; height:${taskHeight}px; z-index:15;"
-                 onclick="toggleGroup('${g.id}')">
-                <span class="mr-2 text-xs">${icon}</span>
-                <span class="truncate" style="font-size:calc(12px * var(--ui-scale, 1));">${g.name}</span>
+            <div class="absolute flex items-center px-2 rounded shadow ${g.type === 'character' ? 'cursor-move' : 'cursor-default'} ${barClass}"
+                 style="left:${x}px; top:${taskTop}px; width:${width}px; height:${taskHeight}px; z-index:15; user-select: none;"
+                 data-group-id="${g.id}">
+                <span class="mr-2 text-xs cursor-pointer hover:text-blue-300 px-1" onclick="toggleGroup('${g.id}'); event.stopPropagation();">${icon}</span>
+                <span class="truncate pointer-events-none" style="font-size:calc(12px * var(--ui-scale, 1));">${g.name}</span>
             </div>
         `;
     });
@@ -1032,6 +1032,35 @@ function setupMouseTracking() {
             return;
         }
 
+        const groupBar = e.target.closest('.gantt-group-bar-character');
+        if (groupBar && !e.target.closest('.cursor-pointer')) {
+            e.preventDefault();
+            e.stopPropagation();
+            dragState.isDragging = true;
+            dragState.mode = 'move-group';
+            dragState.element = groupBar;
+            dragState.groupId = groupBar.getAttribute('data-group-id');
+            dragState.startX = e.clientX;
+            dragState.startY = e.clientY;
+            dragState.initialTop = parseFloat(groupBar.style.top);
+            dragState.initialRowIndex = Math.floor((dragState.initialTop + (24 * ganttConfig.uiScale) / 2) / ganttConfig.rowHeight);
+            
+            groupBar.style.zIndex = '100';
+            document.body.style.cursor = 'move';
+            document.body.classList.add('select-none');
+            
+            // ドラッグ中のガイド線を作成
+            let guide = document.getElementById('gantt-group-drag-guide');
+            if (!guide) {
+                guide = document.createElement('div');
+                guide.id = 'gantt-group-drag-guide';
+                guide.className = 'absolute w-full border-t-2 border-blue-500 z-[200] pointer-events-none hidden';
+                els.ganttTasks.appendChild(guide);
+            }
+            dragState.guide = guide;
+            return;
+        }
+
         const handle = e.target.closest('.gantt-resize-handle');
         const taskEl = e.target.closest('.gantt-task-item');
         
@@ -1093,6 +1122,7 @@ function setupMouseTracking() {
             st.element.style.zIndex = '100';
         });
         document.body.style.cursor = dragState.mode === 'move' ? 'move' : 'ew-resize';
+        document.body.classList.add('select-none');
         
         els.crosshairCol.classList.add('hidden');
         els.crosshairRow.classList.add('hidden');
@@ -1121,6 +1151,21 @@ function setupMouseTracking() {
                 st.element.style.left = `${snappedLeft}px`;
                 st.element.style.top = `${rawTop}px`;
             });
+        } else if (dragState.mode === 'move-group') {
+            const rawTop = dragState.initialTop + dy;
+            dragState.element.style.top = `${rawTop}px`;
+            
+            const centerTop = rawTop + (24 * ganttConfig.uiScale) / 2;
+            const rowIndex = Math.floor(centerTop / ganttConfig.rowHeight);
+            
+            if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
+                const hoverGroup = ganttConfig.groups[rowIndex];
+                if (hoverGroup) {
+                    dragState.guide.style.top = `${rowIndex * ganttConfig.rowHeight}px`;
+                    dragState.guide.classList.remove('hidden');
+                    dragState.targetRowIndex = rowIndex;
+                }
+            }
         } else if (dragState.mode === 'move-deadline') {
             const rawLeft = dragState.initialLeft + dx;
             const snappedLeft = Math.round(rawLeft / ganttConfig.dayWidth) * ganttConfig.dayWidth;
@@ -1150,32 +1195,37 @@ function setupMouseTracking() {
 
         if (!dragState.isDragging) return;
         
-        const dx = Math.abs(e.clientX - dragState.startX);
-        const dy = Math.abs(e.clientY - dragState.startY);
-        const isClick = (dx < 3 && dy < 3);
+        try {
+            const dx = Math.abs(e.clientX - dragState.startX);
+            const dy = Math.abs(e.clientY - dragState.startY);
+            const isClick = (dx < 3 && dy < 3);
 
-        if (isClick) {
-            if (!e.ctrlKey && !e.metaKey) {
-                selectedTaskIds.clear();
-                document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
-                selectedTaskIds.add(dragState.taskId);
-                if (dragState.element) dragState.element.classList.add('selected');
+            if (isClick) {
+                if (!e.ctrlKey && !e.metaKey && dragState.taskId) {
+                    selectedTaskIds.clear();
+                    document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
+                    selectedTaskIds.add(dragState.taskId);
+                    if (dragState.element && dragState.element.classList.contains('gantt-task-item')) {
+                        dragState.element.classList.add('selected');
+                    }
+                }
+                currentTaskContextId = dragState.taskId;
+                
+                dragState.isDragging = false;
+                dragState.element = null;
+                dragState.taskId = null;
+                document.body.style.cursor = '';
+                document.body.classList.remove('select-none');
+                return;
             }
-            currentTaskContextId = dragState.taskId;
-            
-            dragState.isDragging = false;
-            dragState.element = null;
-            dragState.taskId = null;
+    
             document.body.style.cursor = '';
-            return;
-        }
-
-        document.body.style.cursor = '';
-        
-        if (dragState.mode === 'move-deadline') {
-            const finalLeft = parseFloat(dragState.element.style.left) + 6;
-            const newDateM = xToDate(finalLeft).startOf('day');
-            const dateStr = newDateM.format('YYYY-MM-DD');
+            document.body.classList.remove('select-none');
+            
+            if (dragState.mode === 'move-deadline') {
+                const finalLeft = parseFloat(dragState.element.style.left) + 6;
+                const newDateM = xToDate(finalLeft).startOf('day');
+                const dateStr = newDateM.format('YYYY-MM-DD');
             
             // 既存のデータを検索または追加
             let dData = deadlinesRaw.find(d => d.release_id === dragState.releaseId && d.char_id === dragState.charId && d.section_id === dragState.sectionId);
@@ -1198,8 +1248,97 @@ function setupMouseTracking() {
             dragState.element = null;
             return;
         }
+        
+            if (dragState.mode === 'move-group') {
+                if (dragState.guide) {
+                    dragState.guide.classList.add('hidden');
+                }
+                
+                if (dragState.targetRowIndex !== undefined) {
+                    const targetGroup = ganttConfig.groups[dragState.targetRowIndex];
+                    const draggedGroup = ganttConfig.groups.find(g => g.id === dragState.groupId);
+                    
+                    if (draggedGroup && targetGroup && targetGroup.id !== draggedGroup.id) {
+                        let targetRelId, targetCharId;
+                        
+                        if (targetGroup.type === 'character') {
+                            targetRelId = targetGroup.parentId;
+                            targetCharId = targetGroup.raw.char_id;
+                        } else if (targetGroup.type === 'lane') {
+                            const parentCharGroup = ganttConfig.groups.find(g => g.id === targetGroup.parentId);
+                            if (parentCharGroup) {
+                                targetRelId = parentCharGroup.parentId;
+                                targetCharId = parentCharGroup.raw.char_id;
+                            }
+                        }
+                        
+                        const draggedRelId = draggedGroup.parentId;
+                        const draggedCharId = draggedGroup.raw.char_id;
+                        
+                        if (targetRelId === draggedRelId && targetCharId && targetCharId !== draggedCharId) {
+                            saveHistory();
+                            
+                            // ガントに表示されているキャラクターの順序を取得
+                            const charGroups = ganttConfig.groups.filter(g => g.type === 'character' && g.parentId === targetRelId);
+                            const charIds = charGroups.map(g => g.raw.char_id);
+                            
+                            const fromIdx = charIds.indexOf(draggedCharId);
+                            let toIdx = charIds.indexOf(targetCharId);
+                            
+                            if (fromIdx !== -1 && toIdx !== -1) {
+                                // ドラッグ方向に応じて挿入位置を調整
+                                if (dragState.initialRowIndex < dragState.targetRowIndex) {
+                                    toIdx = toIdx + 1;
+                                }
+                                
+                                charIds.splice(fromIdx, 1);
+                                if (fromIdx < toIdx) {
+                                    toIdx--;
+                                }
+                                charIds.splice(toIdx, 0, draggedCharId);
+                                
+                                // 新しいキャラ順序に基づいて allTasksRaw を再構築
+                                const newTasks = [];
+                                const targetReleaseTasks = allTasksRaw.filter(t => t.release_id === targetRelId);
+                                const otherTasks = allTasksRaw.filter(t => t.release_id !== targetRelId);
+                                
+                                charIds.forEach(cid => {
+                                    const tasksForChar = targetReleaseTasks.filter(t => t.char_id === cid);
+                                    newTasks.push(...tasksForChar);
+                                });
+                                
+                                const noCharTasks = targetReleaseTasks.filter(t => !charIds.includes(t.char_id));
+                                newTasks.push(...noCharTasks);
+                                
+                                const firstTargetIdx = allTasksRaw.findIndex(t => t.release_id === targetRelId);
+                                if (firstTargetIdx !== -1) {
+                                    const before = allTasksRaw.slice(0, firstTargetIdx).filter(t => t.release_id !== targetRelId);
+                                    const after = allTasksRaw.slice(firstTargetIdx).filter(t => t.release_id !== targetRelId);
+                                    allTasksRaw = [...before, ...newTasks, ...after];
+                                } else {
+                                    allTasksRaw = [...otherTasks, ...newTasks];
+                                }
+                            }
+                            
+                            markUnsaved();
+                            renderGantt();
+                        } else {
+                            renderGantt();
+                        }
+                    } else {
+                        renderGantt();
+                    }
+                } else {
+                    renderGantt();
+                }
+                
+                dragState.isDragging = false;
+                dragState.element = null;
+                dragState.targetRowIndex = undefined;
+                return;
+            }
 
-        if (dragState.selectedTasks && dragState.selectedTasks.length > 0) {
+            if (dragState.selectedTasks && dragState.selectedTasks.length > 0) {
             saveHistory();
             
             dragState.selectedTasks.forEach(st => {
@@ -1230,17 +1369,24 @@ function setupMouseTracking() {
                             }
                         }
                     }
-                }
-            });
-            
-            markUnsaved();
-            renderGantt();
+                    }
+                });
+                
+                markUnsaved();
+                renderGantt();
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            if (dragState.guide) dragState.guide.classList.add('hidden');
+            dragState.isDragging = false;
+            dragState.element = null;
+            dragState.taskId = null;
+            dragState.selectedTasks = null;
+            dragState.targetRowIndex = undefined;
+            document.body.style.cursor = '';
+            document.body.classList.remove('select-none');
         }
-        
-        dragState.isDragging = false;
-        dragState.element = null;
-        dragState.taskId = null;
-        dragState.selectedTasks = null;
     });
 }
 
@@ -1568,6 +1714,41 @@ function setupMiscEvents() {
                 body: JSON.stringify(deadlinesRaw)
             });
             
+            // タスクの出現順に基づいてマスターデータの順序も更新する
+            if (masters.character) {
+                const orderedChars = [];
+                const seenChars = new Set();
+                
+                // ガントに表示されている順序（タスク順）で取得
+                allTasksRaw.forEach(t => {
+                    if (t.char_id && !seenChars.has(t.char_id)) {
+                        seenChars.add(t.char_id);
+                        const charObj = masters.character.find(c => c.char_id === t.char_id);
+                        if (charObj) {
+                            orderedChars.push(charObj);
+                        }
+                    }
+                });
+                
+                // タスクに含まれていないキャラクターを最後に追加
+                masters.character.forEach(c => {
+                    if (!seenChars.has(c.char_id)) {
+                        orderedChars.push(c);
+                    }
+                });
+                
+                masters.character = orderedChars;
+                
+                await fetch(`/api/masters/save?project=${currentProject}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        master_type: 'character',
+                        data: orderedChars
+                    })
+                });
+            }
+
             const result = await res.json();
             const resultDeadlines = await resDeadlines.json();
             
