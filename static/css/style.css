@@ -164,13 +164,16 @@ body, html {
 
 /* 印刷用 */
 @media print {
-    header, #side-panel, #context-menu, #unsaved-badge {
+    header, #side-panel, #context-menu, #unsaved-badge, #project-tabs-container, #ai-preview-bar, #ai-chat-panel, #export-container {
         display: none !important;
     }
-    body, html, #gantt-container {
+    body, html {
         height: auto !important;
+        width: auto !important;
         overflow: visible !important;
+        background: white !important;
     }
+    /* 印刷時の背景色強制 */
     * {
         -webkit-print-color-adjust: exact !important;
         color-adjust: exact !important;

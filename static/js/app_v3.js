@@ -2639,6 +2639,213 @@ JSONフォーマット:
     document.getElementById('filter-hide-completed').addEventListener('change', () => {
         renderGantt();
     });
+
+    // --- エクスポート(CSV/印刷)機能 ---
+    const btnExportToggle = document.getElementById('btn-export-toggle');
+    const exportDropdown = document.getElementById('export-dropdown');
+    const btnExportCsv = document.getElementById('btn-export-csv');
+    const btnExportPrint = document.getElementById('btn-export-print');
+
+    if (btnExportToggle && exportDropdown) {
+        btnExportToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            exportDropdown.classList.toggle('hidden');
+        });
+    }
+
+    // 外側クリックでエクスポートドロップダウンを閉じる
+    document.addEventListener('click', (e) => {
+        if (exportDropdown && !exportDropdown.classList.contains('hidden')) {
+            if (!e.target.closest('#export-container')) {
+                exportDropdown.classList.add('hidden');
+            }
+        }
+    });
+
+    // CSVエクスポート処理
+    if (btnExportCsv) {
+        btnExportCsv.addEventListener('click', () => {
+            exportDropdown.classList.add('hidden');
+            
+            // 1. CSVデータのヘッダー定義
+            const headers = ["タスクID", "バージョン(リリース)", "キャラクター名(衣装名)", "セクション", "タスク名", "担当者", "開始日", "終了日", "進捗率(%)"];
+            
+            // 2. 表示中タスク(currentFilteredTasks)をマッピング
+            const csvRows = [headers];
+            currentFilteredTasks.forEach(t => {
+                const charObj = t.char_id ? getMasterItem('character', 'char_id', t.char_id) : null;
+                const charName = charObj ? `${charObj.char_name}(${charObj.costume_name || 'デフォルト'})` : '';
+                const relName = t.release_id ? (getMasterItem('release', 'release_id', t.release_id)?.release_name || '') : '';
+                const memberName = t.member_id ? (getMasterItem('member', 'member_id', t.member_id)?.member_name || '') : '未定';
+                const sectionName = t.section_id ? (getMasterItem('section', 'section_id', t.section_id)?.section_name || '') : '';
+                
+                const row = [
+                    t.task_id || '',
+                    relName,
+                    charName,
+                    sectionName,
+                    t.task_name || '',
+                    memberName,
+                    t.start_date || '',
+                    t.end_date || '',
+                    t.progress || '0'
+                ];
+                
+                // カンマやダブルクォーテーションのエスケープ
+                const escapedRow = row.map(val => {
+                    const str = String(val).replace(/"/g, '""');
+                    return `"${str}"`;
+                });
+                csvRows.push(escapedRow);
+            });
+
+            // 3. UTF-8(BOM付き)でBlob作成してダウンロード
+            const csvContent = "\ufeff" + csvRows.map(e => e.join(',')).join("\r\n");
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            
+            const dateStr = moment().format('YYYYMMDD');
+            link.setAttribute("href", url);
+            link.setAttribute("download", `WBS_Export_${currentProject}_${dateStr}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    }
+
+    // PDFエクスポート / 印刷処理 (別ウィンドウにHTMLコピー＋固定サイズ化)
+    if (btnExportPrint) {
+        btnExportPrint.addEventListener('click', () => {
+            exportDropdown.classList.add('hidden');
+            
+            const ganttBodyContent = document.getElementById('gantt-body-content');
+            if (!ganttBodyContent) return;
+
+            // 実際の全体の幅と高さをピクセルで取得
+            const fullWidth = ganttBodyContent.scrollWidth;
+            const fullHeight = ganttBodyContent.scrollHeight;
+            const headerHtml = document.getElementById('gantt-header-content') ? document.getElementById('gantt-header-content').innerHTML : '';
+            const tasksHtml = document.getElementById('gantt-tasks') ? document.getElementById('gantt-tasks').innerHTML : '';
+            const gridHtml = document.getElementById('gantt-grid') ? document.getElementById('gantt-grid').innerHTML : '';
+            const rowsHtml = document.getElementById('gantt-rows') ? document.getElementById('gantt-rows').innerHTML : '';
+
+            // 印刷用の新しいウィンドウを開く
+            const printWindow = window.open('', '_blank');
+            if (!printWindow) {
+                alert('ポップアップブロックが有効になっている可能性があります。許可して再試行してください。');
+                return;
+            }
+
+            // 元のページのスタイルシートをすべて新しいウィンドウに複製する
+            let stylesHtml = '';
+            document.querySelectorAll('link[rel="stylesheet"], style').forEach(style => {
+                stylesHtml += style.outerHTML;
+            });
+
+            // 印刷用のHTMLドキュメントを作成
+            printWindow.document.write(`
+                <!DOCTYPE html>
+                <html lang="ja">
+                <head>
+                    <meta charset="UTF-8">
+                    <title>WBS Export Print</title>
+                    <script src="https://cdn.tailwindcss.com"></script>
+                    ${stylesHtml}
+                    <style>
+                        /* 印刷専用スタイル：完全に一枚の巨大なキャンバスとして扱う */
+                        body, html {
+                            margin: 0 !important;
+                            padding: 0 !important;
+                            background: white !important;
+                        }
+                        
+                        /* 全てを包含するキャンバス */
+                        .print-canvas {
+                            position: relative;
+                            width: ${fullWidth}px;
+                            height: ${fullHeight + 120}px;
+                            background: white;
+                            overflow: hidden;
+                        }
+
+                        /* ヘッダー領域 */
+                        .print-header {
+                            position: absolute;
+                            top: 0;
+                            left: 0;
+                            width: ${fullWidth}px;
+                            height: 120px;
+                            background: #f9fafb; /* gray-50 */
+                            border-bottom: 1px solid #d1d5db;
+                        }
+
+                        /* ボディ領域 */
+                        .print-body {
+                            position: absolute;
+                            top: 120px;
+                            left: 0;
+                            width: ${fullWidth}px;
+                            height: ${fullHeight}px;
+                        }
+
+                        /* 内部レイヤー */
+                        .print-layer {
+                            position: absolute;
+                            top: 0;
+                            left: 0;
+                            width: ${fullWidth}px;
+                            height: ${fullHeight}px;
+                        }
+
+                        /* 印刷時に背景がオフでも枠線が見えるようにする */
+                        .gantt-task-item {
+                            border: 2px solid rgba(0,0,0,0.8) !important;
+                            background-color: #ddd !important;
+                        }
+
+                        @media print {
+                            @page {
+                                size: landscape;
+                                margin: 5mm;
+                            }
+                        }
+
+                        * {
+                            -webkit-print-color-adjust: exact !important;
+                            color-adjust: exact !important;
+                            print-color-adjust: exact !important;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="print-canvas">
+                        <!-- ヘッダー -->
+                        <div class="print-header">
+                            ${headerHtml}
+                        </div>
+                        <!-- ボディ -->
+                        <div class="print-body">
+                            <div class="print-layer" style="z-index: 1;">${gridHtml}</div>
+                            <div class="print-layer" style="z-index: 2;">${rowsHtml}</div>
+                            <div class="print-layer" style="z-index: 3;">${tasksHtml}</div>
+                        </div>
+                    </div>
+                    <script>
+                        window.onload = function() {
+                            setTimeout(() => {
+                                window.print();
+                                window.close();
+                            }, 500);
+                        };
+                    </script>
+                </body>
+                </html>
+            `);
+            printWindow.document.close();
+        });
+    }
     
     // els.ganttTasks.addEventListener('dblclick', (e) => {
     // ダブルクリックによるエディタ展開は廃止（コンテキストメニューに移行）
@@ -2648,6 +2855,12 @@ JSONフォーマット:
 
     els.ganttBody.addEventListener('contextmenu', (e) => {
         e.preventDefault();
+        
+        // 右クリック時はポップアップ（ツールチップ）を非表示にする
+        if (els.taskTooltip) {
+            els.taskTooltip.classList.add('hidden');
+        }
+
         const taskEl = e.target.closest('.gantt-task-item');
         
         if (taskEl) {
@@ -2674,6 +2887,7 @@ JSONフォーマット:
 
         const contextMenu = document.getElementById('context-menu');
         if (contextMenu) {
+            contextMenu.style.zIndex = '20000'; // 最前面にする
             // 全てのメニューアイテムを表示し、一旦有効化する
             contextMenu.querySelectorAll('.menu-item').forEach(el => {
                 el.classList.remove('hidden');
@@ -2693,8 +2907,8 @@ JSONフォーマット:
                 }
             }
 
-            contextMenu.style.left = e.pageX + 'px';
-            contextMenu.style.top = e.pageY + 'px';
+            contextMenu.style.left = e.clientX + 'px';
+            contextMenu.style.top = e.clientY + 'px';
             contextMenu.classList.remove('hidden');
         }
     });

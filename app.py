@@ -73,12 +73,18 @@ def receive_log():
         print(f"\\n============================\\n[JS {data.get('type', 'INFO')}] {data.get('message', '')}\\n============================\\n")
     return jsonify({"status": "ok"})
 
-last_heartbeat = time.time()
+# ハートビート時刻をファイルで共有・保持する（マルチプロセス/Debugモード対応）
+HEARTBEAT_FILE = os.path.join(DATA_DIR, 'heartbeat.txt')
 
 @app.route('/api/heartbeat', methods=['POST'])
 def heartbeat():
-    global last_heartbeat
-    last_heartbeat = time.time()
+    try:
+        # dataディレクトリがない場合は作成
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(HEARTBEAT_FILE, 'w', encoding='utf-8') as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        print("Heartbeat write error:", e)
     return jsonify({"status": "ok"})
 
 @app.route('/api/restart', methods=['POST'])
@@ -385,14 +391,36 @@ if __name__ == '__main__':
             webbrowser.open(url)
         
     def check_heartbeat():
-        global last_heartbeat
+        # 初回起動時にハートビートファイルを作成・初期化
+        os.makedirs(DATA_DIR, exist_ok=True)
+        h_file = os.path.join(DATA_DIR, 'heartbeat.txt')
+        with open(h_file, 'w', encoding='utf-8') as f:
+            f.write(str(time.time()))
+
         time.sleep(15)  # 初回起動時の猶予
         while True:
             time.sleep(3)
-            # 10秒以上ハートビートがなければブラウザが閉じられたとみなして終了
-            if time.time() - last_heartbeat > 10:
-                print("Browser closed. Exiting server...")
-                os._exit(0)
+            try:
+                if os.path.exists(h_file):
+                    with open(h_file, 'r', encoding='utf-8') as f:
+                        val = float(f.read().strip())
+                    # 5秒以上ハートビートファイルが更新されていなければ終了
+                    if time.time() - val > 5:
+                        print("Browser closed. Exiting server...")
+                        # CMDウィンドウごと強制終了する
+                        if os.name == 'nt':
+                            # 親プロセスのCMDを終了させる
+                            os.system('taskkill /F /IM cmd.exe /T >nul 2>&1')
+                        os._exit(0)
+                else:
+                    # ファイルが消された場合も終了
+                    print("Heartbeat file missing. Exiting server...")
+                    if os.name == 'nt':
+                        os.system('taskkill /F /IM cmd.exe /T >nul 2>&1')
+                    os._exit(0)
+            except Exception as e:
+                # 読み込み中の一時的な競合等はスキップ
+                pass
 
     if not os.environ.get('WERKZEUG_RUN_MAIN'):
         threading.Thread(target=open_browser, daemon=True).start()

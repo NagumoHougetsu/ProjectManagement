@@ -10,6 +10,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
     <!-- Marked.js (Markdown Parser) -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- html2canvas -->
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
     <!-- Custom CSS -->
     <script>
         const link = document.createElement('link');
@@ -63,6 +65,20 @@
             <button id="btn-redo" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded transition disabled:opacity-50" disabled>やり直し</button>
             <a href="/master_editor" target="_blank" class="bg-gray-600 hover:bg-gray-500 text-white px-4 py-2 rounded transition" id="master-editor-link">マスタ管理</a>
             <button id="btn-save" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded font-bold shadow transition">保存</button>
+            
+            <!-- エクスポートボタン（ドロップダウン） -->
+            <div class="relative inline-block text-left" id="export-container">
+                <button id="btn-export-toggle" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold shadow transition flex items-center space-x-1">
+                    <span>📤 出力 (エクスポート)</span>
+                    <span class="text-xs">▼</span>
+                </button>
+                <div id="export-dropdown" class="hidden absolute right-0 mt-2 w-40 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-50 text-black">
+                    <div class="py-1" role="menu">
+                        <button id="btn-export-csv" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 hover:text-gray-900" role="menuitem">CSV 形式で保存</button>
+                    </div>
+                </div>
+            </div>
+
             <button id="btn-restart" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded font-bold shadow transition">サーバー再起動</button>
             <button id="btn-ai-chat" class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded font-bold shadow transition flex items-center">
                 <span>🤖 AIアシスタント</span>
@@ -331,7 +347,7 @@
         </div>
 
         <!-- Context Menu -->
-        <div id="context-menu" class="absolute bg-white border shadow-lg rounded hidden z-50 py-1 w-48">
+        <div id="context-menu" class="fixed bg-white border shadow-lg rounded hidden z-50 py-1 w-48">
             <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-edit" id="ctx-edit">編集 / 開く</div>
             
             <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer font-bold text-gray-700 menu-item ctx-item-empty" id="ctx-create-task">タスクの作成</div>
@@ -368,11 +384,6 @@
         setInterval(() => {
             fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
         }, 3000);
-
-        // ウィンドウ・タブが閉じられた瞬間に、確実にサーバープロセスを落とす
-        window.addEventListener('pagehide', () => {
-            navigator.sendBeacon('/api/shutdown');
-        });
         
         const script = document.createElement('script');
         // 完全自作版のJS（app_v3.js）を読み込む
