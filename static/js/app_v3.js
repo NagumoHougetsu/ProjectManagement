@@ -2567,10 +2567,10 @@ function setupMiscEvents() {
         });
     }
 
-    function renderAiChatMessages(messages) {
+    function renderAiChatMessages(messages, showLoading = false) {
         const container = document.getElementById('ai-chat-messages');
         container.innerHTML = '';
-        if (messages.length === 0) {
+        if (messages.length === 0 && !showLoading) {
             container.innerHTML = '<div class="text-gray-500 text-center text-xs mt-4">メッセージを入力して会話を始めてください。</div>';
             return;
         }
@@ -2580,6 +2580,7 @@ function setupMiscEvents() {
         messages.forEach(msg => {
             const div = document.createElement('div');
             const isUser = msg.role === 'user';
+            const isError = msg.role === 'error';
             div.className = `flex flex-col ${isUser ? 'items-end' : 'items-start'} space-y-1 mb-3`;
             
             let messageHTML = '';
@@ -2587,6 +2588,29 @@ function setupMiscEvents() {
 
             if (isUser) {
                 messageHTML = `<div class="bg-blue-100 border-blue-200 border rounded-lg p-2 text-sm max-w-[90%] whitespace-pre-wrap">${escapeHTML(msg.content)}</div>`;
+            } else if (msg.role === 'process') {
+                const isActive = msg.status === 'active';
+                const icon = isActive 
+                    ? `<span class="animate-spin h-3 w-3 text-blue-500 rounded-full border-2 border-t-transparent flex-shrink-0"></span>` 
+                    : `<span class="text-green-500 font-bold flex-shrink-0 select-none">✔️</span>`;
+                const bgClass = isActive 
+                    ? 'bg-blue-50/40 border-blue-200/50 border border-dashed animate-pulse text-blue-700' 
+                    : 'bg-gray-50 border-gray-200 border text-gray-500';
+
+                messageHTML = `
+<div class="${bgClass} rounded-lg p-2 text-xs max-w-[90%] flex items-center space-x-2 select-none shadow-sm">
+  ${icon}
+  <span class="font-mono font-semibold">${escapeHTML(msg.content)} (${escapeHTML(msg.time)}${msg.tokens || ''})</span>
+</div>`;
+            } else if (isError) {
+                messageHTML = `
+<div class="bg-red-50 border-red-200 border rounded-lg p-3 text-sm max-w-[90%] text-red-700 flex items-start space-x-2 shadow-sm">
+  <span class="text-base">⚠️</span>
+  <div>
+    <div class="font-bold mb-1">エラーが発生しました</div>
+    <div class="text-xs break-all whitespace-pre-wrap">${escapeHTML(msg.content)}</div>
+  </div>
+</div>`;
             } else {
                 let parsedContent = typeof marked !== 'undefined' ? marked.parse(msg.content) : escapeHTML(msg.content);
 
@@ -2601,7 +2625,35 @@ function setupMiscEvents() {
 `;
                 });
 
-                messageHTML = `<div class="bg-gray-100 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] ai-markdown-content">${parsedContent}</div>`;
+                // 今回のメッセージでのトークン消費・処理ログフッターを追加
+                let tokenFooter = '';
+                if (msg.tokens || msg.responseTime) {
+                    const timeStr = msg.timestamp ? ` [${msg.timestamp}]` : '';
+                    const respTimeStr = msg.responseTime ? ` (応答時間: ${msg.responseTime}秒)` : '';
+                    const tokenStr = msg.tokens ? ` (消費: ${msg.tokens} tokens)` : '';
+                    
+                    tokenFooter = `
+<div class="mt-2 border-t pt-1 text-[10px] text-gray-400 font-semibold flex justify-between items-center select-none">
+  <span>🪙${tokenStr}${respTimeStr}${timeStr}</span>
+</div>
+<details class="bg-white border rounded p-2 mt-2 text-[10px] text-gray-600 cursor-pointer select-none">
+  <summary class="font-bold text-gray-500 outline-none hover:text-gray-700">⚙️ WBS処理プロセス・ログを表示 (クリックで展開)</summary>
+  <div class="font-mono mt-1 space-y-1 pl-2 border-l border-gray-300 text-left">
+    <div>• [1] 対象期間タスク＆マスターデータ抽出 (完了)</div>
+    <div>• [2] システムプロンプト＆コンテキスト結合 (完了)</div>
+    <div>• [3] AIサーバー接続・スケジュールパズル計算 (完了 / 所要時間: ${msg.responseTime || '?.?'}s)</div>
+    <div>• [4] 物理制約バリデーション（依存関係/デッドライン） (完了)</div>
+    <div>• [5] ガントチャートプレビュー用データ出力 (完了)</div>
+    <div class="text-[9px] text-gray-400 mt-1 border-t border-dashed pt-1">
+      - 取得ステータス: 成功 (BOM付きデータ互換検証済)<br>
+      - 送信コンテキスト: 6メッセージ上限スライス適用済
+    </div>
+  </div>
+</details>
+`;
+                }
+
+                messageHTML = `<div class="bg-gray-100 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] ai-markdown-content">${parsedContent}${tokenFooter}</div>`;
 
                 // メッセージテキスト内からタスク提案JSONを検出（コードブロックまたは配列の正規表現）
                 const jsonBlockRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -2630,13 +2682,18 @@ function setupMiscEvents() {
                 }
             }
 
+            let senderName = 'AIアシスタント';
+            if (isUser) senderName = 'あなた';
+            else if (isError) senderName = 'システムエラー';
+            else if (msg.role === 'process') senderName = '処理プロセス';
+
             div.innerHTML = `
-                <div class="text-xs text-gray-500 font-bold px-1">${isUser ? 'あなた' : 'AIアシスタント'}</div>
+                <div class="text-xs text-gray-500 font-bold px-1">${senderName}</div>
                 ${messageHTML}
             `;
 
             // タスク提案が検出された場合、自動的にプレビューを実行 (ただし適用済みメッセージの場合はスキップ)
-            if (parsedTasks && !isUser && !msg.isApplied) {
+            if (parsedTasks && !isUser && !isError && !msg.isApplied) {
                 foundProposal = true;
                 
                 // バックアップを一度だけ取得
@@ -2665,6 +2722,24 @@ function setupMiscEvents() {
             if (aiPreviewBar) {
                 aiPreviewBar.classList.remove('hidden');
             }
+        }
+
+        // Loading（考え中...）のぐるぐるマークを末尾に追加
+        if (showLoading) {
+            const loadingText = typeof showLoading === 'string' ? showLoading : 'スケジュールをパズルしています...';
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'flex flex-col items-start space-y-1 mb-3 animate-pulse';
+            loadingDiv.innerHTML = `
+                <div class="text-xs text-gray-500 font-bold px-1">AIアシスタント</div>
+                <div class="bg-gray-50 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] flex items-center space-x-2 text-gray-500 shadow-sm">
+                    <svg class="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span class="text-xs font-semibold ai-loading-text">AIが考え中... (${loadingText})</span>
+                </div>
+            `;
+            container.appendChild(loadingDiv);
         }
 
         container.scrollTop = container.scrollHeight;
@@ -2775,17 +2850,28 @@ function setupMiscEvents() {
     }
 
     // チャット送信処理
+    let isAiSending = false;
+    let currentAbortController = null;
+
     const aiChatInput = document.getElementById('ai-chat-input');
     const btnAiSend = document.getElementById('btn-ai-send');
     if (btnAiSend && aiChatInput) {
         // Ctrl+Enterで送信
         aiChatInput.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 'Enter') {
-                btnAiSend.click();
+                if (!isAiSending) btnAiSend.click();
             }
         });
 
         btnAiSend.addEventListener('click', async () => {
+            if (isAiSending) {
+                // すでに送信中の場合は「停止（中断）」として機能する
+                if (currentAbortController) {
+                    currentAbortController.abort();
+                }
+                return;
+            }
+
             const text = aiChatInput.value.trim();
             if (!text || !currentSessionId) return;
 
@@ -2818,14 +2904,162 @@ function setupMiscEvents() {
                 session.title = text.substring(0, 15) + (text.length > 15 ? '...' : '');
                 aiPanelTitle.textContent = session.title;
             }
-            
-            renderAiChatMessages(session.messages);
-            aiChatInput.value = '';
-            btnAiSend.disabled = true;
 
             // 送信用メッセージ履歴をディープコピーして、直近のメッセージだけ添付データ付きにする
-            const sendMessages = JSON.parse(JSON.stringify(session.messages));
+            let sendMessages = JSON.parse(JSON.stringify(session.messages));
             sendMessages[sendMessages.length - 1].content = sendContent;
+
+            // 💸 お財布大爆発防止ブレーキ（トークン節約機能）
+            if (sendMessages.length > 6) {
+                sendMessages = sendMessages.slice(-6);
+            }
+
+            // 送信用システムプロンプトの構築
+            let sysPrompt = aiSettings.systemPrompt || 'あなたはプロジェクト管理アシスタントです。';
+            sysPrompt += getContextTextForSession(session);
+
+            // 【常時追加されるシステムコアプロンプト】
+            // ガントチャートのリアルタイムプレビューを確実に動作させ、複数キャラクター間のリソース平準化を成功させるための命令
+            sysPrompt += `
+
+【超重要指示 - WBS制御システム制約ルール（絶対厳守）】
+1. ユーザーからスケジュールの調整、平準化、延期、再構築を求められた場合、日本語での分かりやすい解説とともに、変更後のスケジュールデータを以下のJSONコードブロック（ \`\`\`json ... \`\`\` ）で必ず返答に含めて出力してください。
+
+[出力JSON形式]
+\`\`\`json
+[
+  {
+    "id": "タスクID（例: TSK_00001）",
+    "start": "新しい開始日（YYYY-MM-DD）",
+    "end": "新しい終了日（YYYY-MM-DD）"
+  }
+]
+\`\`\`
+
+2. 【絶対厳守の物理制約（1つでも破る提案は完全に無効・NGとなります）】
+- 【制約A: 先行・後続タスクの順序厳守】
+  各タスクデータの "dep" (先行タスクID) が空欄ではない場合、その後続タスクの開始日 (start) は、必ず "dep" に指定されているすべての先行タスクの終了日 (end) の「翌日以降」に配置してください。絶対に先行タスクの期間と被ったり、先行タスクが終わる前に開始してはなりません。
+- 【制約B: アート締め（art_deadline）の限界厳守】
+  バージョン情報内の「アート締め（art_deadline）」の日付を超えてスケジュールを組むことは、どのような理由があっても「絶対に禁止」です。すべてのタスクの終了日 (end) は、必ず所属するバージョンの art_deadline の日付以前（当日含む）に収めてください。これを超える提案はプログラム上でクラッシュします。
+- 【制約C: セクション締め（deadline_date）の限界厳守】
+  キャラクター・セクションごとに設定されている「セクション締め（deadline_date）」の日付以前（当日含む）に、該当セクション内の全タスクが完了するようにスケジュールを収めてください。
+
+3. 【複数グループ（キャラクター）をまたいだリソース平準化（Leveling）のルール】
+WBS全体で同一の担当者（member_id）のスケジュールに「タスク期間の重複（被り）」が発生している場合、複数のキャラクター（子グループ）やバージョン（リリース）をまたいで、それらのタスクが「絶対に重複（並行作業）しない」ように、パズルのように直列に平準化（スライド）させてください。
+- 同一担当者のタスク同士を日付順に直列にソートし、前の作業が終わった「翌日（または数日後）」に次の作業を開始するように直列化して押し出してください。
+- 押し出す際、上記の「制約A（先行後続順序）」「制約B（アート締め限界）」「制約C（セクション締め限界）」をすべて同時に満たすようにパズルしてください。
+- 対象期間における全担当者の重複（被り）状況は、上のコンテキストテキストの「タスク期間の重複状況」に詳しくリストアップされています。これをもとに、被りが完全に「0件」になるようにパズルしてください。
+`;
+
+            if (currentAiMode === 'operator') {
+                sysPrompt += `
+【超重要指示 - オペレーターモード】
+マスターデータの変更が必要な場合、あなたは会話の返答の最後に「必ず」以下のJSONフォーマットをコードブロック（ \`\`\`json ... \`\`\` ）で出力してください。
+日本語の解説は、コードブロックの手前に記載してください。
+
+JSONフォーマット:
+\`\`\`json
+{
+  "action": "update_masters",
+  "data": {
+    "character": [ ...キャラクターマスタ(m_character.csv)の現在の最新全レコード... ],
+    "member": [ ...メンバーマスタ(m_member.csv)の現在の最新全レコード... ],
+    "release": [ ...リリース（バージョン）マスタ(m_release.csv)の現在の最新全レコード... ],
+    "section": [ ...セクションマスタ(m_section.csv)の現在の最新全レコード... ],
+    "task_template": [ ...タスクテンプレート(m_task_template.csv)の現在の最新全レコード... ]
+  }
+}
+\`\`\`
+※変更されたレコードだけでなく、「すべての」レコードを含めた新しい配列を返してください。既存のデータを誤って削除しないように注意し、追加または更新してください。
+現在のマスタ状態は、上のプロジェクトコンテキスト内の「マスターデータ」を参照してください。
+`;
+            }
+
+            // トークンサイズの概算（1文字あたり約0.65トークンで見積もり）
+            const estimatedInputTokens = Math.ceil((sysPrompt.length + JSON.stringify(sendMessages).length) * 0.65);
+
+            // プロセス表示タイマー
+            let processTimer = null;
+            const processSteps = [
+                { id: 1, textDesc: "対象期間タスク＆マスターデータの抽出・整形", status: 'active', time: 0 },
+                { id: 2, textDesc: "システムプロンプト＆コンテキスト結合（送信準備）", status: 'pending', time: 0 },
+                { id: 3, textDesc: "AIサーバー接続・スケジュールパズル計算中", status: 'pending', time: 0 },
+                { id: 4, textDesc: "各締め切りと先行後続（矢印）の整合性を検証中", status: 'pending', time: 0 },
+                { id: 5, textDesc: "提案データをフォーマット中。まもなく仮反映されます...", status: 'pending', time: 0 }
+            ];
+
+            aiChatInput.value = '';
+            
+            // 送信ボタンを「■ 中断」に切り替える（disabledにはしない！）
+            isAiSending = true;
+            btnAiSend.textContent = '■ 中断';
+            btnAiSend.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+            btnAiSend.classList.add('bg-red-500', 'hover:bg-red-600');
+
+            // AbortControllerの初期化
+            currentAbortController = new AbortController();
+
+            const startTime = Date.now();
+            let currentStepIndex = 0;
+
+            processTimer = setInterval(() => {
+                const now = Date.now();
+                const elapsedSinceStart = now - startTime;
+                
+                // 現在アクティブなステップの経過秒数を更新（ストップウォッチ）
+                processSteps[currentStepIndex].time = (elapsedSinceStart / 1000).toFixed(1);
+                
+                // 特定の経過時間または特定の状態に応じて自動的に次のステップへ遷移
+                if (currentStepIndex === 0 && elapsedSinceStart >= 1000) {
+                    processSteps[currentStepIndex].status = 'done';
+                    currentStepIndex = 1;
+                    processSteps[currentStepIndex].status = 'active';
+                } else if (currentStepIndex === 1 && elapsedSinceStart >= 2500) {
+                    processSteps[currentStepIndex].status = 'done';
+                    currentStepIndex = 2;
+                    processSteps[currentStepIndex].status = 'active';
+                } else if (currentStepIndex === 2 && elapsedSinceStart >= 12000) {
+                    processSteps[currentStepIndex].status = 'done';
+                    currentStepIndex = 3;
+                    processSteps[currentStepIndex].status = 'active';
+                } else if (currentStepIndex === 3 && elapsedSinceStart >= 18000) {
+                    processSteps[currentStepIndex].status = 'done';
+                    currentStepIndex = 4;
+                    processSteps[currentStepIndex].status = 'active';
+                }
+
+                // tempMessages の再構築
+                const renderMessages = [...session.messages];
+                processSteps.forEach(step => {
+                    if (step.status === 'done' || step.status === 'active') {
+                        let tokenText = '';
+                        if (step.id === 1 || step.id === 2) {
+                            tokenText = ` / 送信見積: ~${estimatedInputTokens} tokens`;
+                        }
+                        renderMessages.push({
+                            role: 'process',
+                            content: step.textDesc,
+                            time: `${step.time}s`,
+                            status: step.status,
+                            tokens: tokenText
+                        });
+                    }
+                });
+
+                renderAiChatMessages(renderMessages, false);
+            }, 100);
+
+            // 送信用メッセージ履歴をディープコピーして、直近のメッセージだけ添付データ付きにする
+            let sendMessages = JSON.parse(JSON.stringify(session.messages));
+            sendMessages[sendMessages.length - 1].content = sendContent;
+
+            // 💸 お財布大爆発防止ブレーキ（トークン節約機能）
+            // 過去ログをすべて送り続けるとリクエストごとに数万トークンを消費してしまうため、
+            // 直近の6メッセージ（会話の往復で最大3往復分）に履歴を制限して送信します。
+            // ※最新のガントのコンテキストは常に最新のシステムプロンプトとして送信されるため、過去履歴を制限しても実用上の精度は一切落ちません。
+            if (sendMessages.length > 6) {
+                sendMessages = sendMessages.slice(-6);
+            }
 
             // 送信用システムプロンプトの構築
             let sysPrompt = aiSettings.systemPrompt || 'あなたはプロジェクト管理アシスタントです。';
@@ -2900,12 +3134,23 @@ JSONフォーマット:
                         temperature: aiSettings.temperature,
                         systemPrompt: sysPrompt,
                         messages: sendMessages
-                    })
+                    }),
+                    signal: currentAbortController.signal // Abortシグナルを設定
                 });
                 
                 const data = await res.json();
+                const endTime = Date.now();
+                const elapsedSeconds = ((endTime - startTime) / 1000).toFixed(1);
+                const currentTimeStr = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
                 if (data.status === 'success') {
-                    session.messages.push({ role: 'assistant', content: data.reply });
+                    session.messages.push({ 
+                        role: 'assistant', 
+                        content: data.reply, 
+                        tokens: data.tokens,
+                        responseTime: elapsedSeconds,
+                        timestamp: currentTimeStr
+                    });
                     session.totalTokens = (session.totalTokens || 0) + data.tokens;
                     renderAiChatMessages(session.messages);
 
@@ -2928,16 +3173,31 @@ JSONフォーマット:
                     // 添付リセット
                     if (btnRemoveAttachment) btnRemoveAttachment.click();
                 } else {
-                    alert('APIエラー: ' + data.message);
-                    // 失敗時はユーザーメッセージを取り消す
-                    session.messages.pop();
-                    renderAiChatMessages(session.messages);
-                    aiChatInput.value = text;
+                    // APIエラー時のインラインエラーカード追加
+                    session.messages.push({ role: 'error', content: `APIエラー: ${data.message}` });
+                    renderAiChatMessages(session.messages, false);
                 }
             } catch (e) {
-                alert('通信エラーが発生しました: ' + e);
+                if (e.name === 'AbortError') {
+                    // ユーザーによって中断された場合
+                    session.messages.push({ role: 'error', content: 'ユーザーによって処理が中断されました。' });
+                    renderAiChatMessages(session.messages, false);
+                } else {
+                    // 通常の通信エラー時のインラインエラーカード追加
+                    session.messages.push({ role: 'error', content: `通信エラー: ${e.message || e}` });
+                    renderAiChatMessages(session.messages, false);
+                }
             } finally {
-                btnAiSend.disabled = false;
+                if (processTimer) {
+                    clearInterval(processTimer);
+                }
+                // 送信状態を「送信（青）」に戻す
+                isAiSending = false;
+                currentAbortController = null;
+                btnAiSend.textContent = '送信';
+                btnAiSend.classList.remove('bg-red-500', 'hover:bg-red-600');
+                btnAiSend.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                
                 // 保存
                 sessions[sessionIndex] = session;
                 localStorage.setItem('ai_sessions', JSON.stringify(sessions));

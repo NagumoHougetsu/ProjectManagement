@@ -11,6 +11,13 @@ if getattr(sys, 'frozen', False):
 else:
     app = Flask(__name__)
 
+import logging
+log = logging.getLogger('werkzeug')
+class HeartbeatFilter(logging.Filter):
+    def filter(self, record):
+        return "/api/heartbeat" not in record.getMessage()
+log.addFilter(HeartbeatFilter())
+
 # ブラウザキャッシュを完全に無効化する
 @app.after_request
 def add_header(response):
