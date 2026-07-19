@@ -4,6 +4,9 @@ data/**/*.csv
 # But keep Sample project data for Git tracking
 !data/projects/Sample/*.csv
 
+# Temporary files
+data/heartbeat.txt
+
 # Python Virtual Environment
 venv/
 env/

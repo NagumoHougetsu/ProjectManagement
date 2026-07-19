@@ -44,9 +44,11 @@ const els = {
     ganttGrid: document.getElementById('gantt-grid'),
     ganttRows: document.getElementById('gantt-rows'),
     ganttTasks: document.getElementById('gantt-tasks'),
+    ganttProgressLine: document.getElementById('gantt-progress-line'),
     crosshairCol: document.getElementById('gantt-crosshair-col'),
     crosshairRow: document.getElementById('gantt-crosshair-row'),
-    unsavedBadge: document.getElementById('unsaved-badge')
+    unsavedBadge: document.getElementById('unsaved-badge'),
+    toggleProgressLine: document.getElementById('toggle-progress-line')
 };
 
 let currentTaskContextId = null;
@@ -417,6 +419,7 @@ function renderGantt() {
     renderHeaderAndGrid(totalWidth);
     renderRows();
     renderTasks();
+    renderProgressLine();
 }
 
 function buildGroupsList() {
@@ -862,6 +865,132 @@ function renderTasks() {
     });
 
     els.ganttTasks.innerHTML = html;
+}
+
+function renderProgressLine() {
+    const container = els.ganttProgressLine;
+    if (!container) return;
+    container.innerHTML = '';
+    
+    if (!els.toggleProgressLine || !els.toggleProgressLine.checked) return;
+
+    const todayX = dateToX(moment().startOf('day'));
+    const ganttHeight = els.ganttBodyContent.offsetHeight || 5000;
+
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.style.width = '100%';
+    svg.style.height = `${ganttHeight}px`;
+    svg.style.position = 'absolute';
+    svg.style.top = '0';
+    svg.style.left = '0';
+    svg.style.pointerEvents = 'none';
+
+    const baseLine = document.createElementNS(svgNS, 'line');
+    baseLine.setAttribute('x1', todayX);
+    baseLine.setAttribute('y1', 0);
+    baseLine.setAttribute('x2', todayX);
+    baseLine.setAttribute('y2', ganttHeight);
+    baseLine.setAttribute('stroke', '#9ca3af'); // 基準線をグレー系に変更
+    baseLine.setAttribute('stroke-width', '1.5');
+    baseLine.setAttribute('stroke-dasharray', '4 4');
+    svg.appendChild(baseLine);
+
+    const taskElements = document.querySelectorAll('.gantt-task-item');
+    const tasksData = [];
+
+    taskElements.forEach(el => {
+        const taskId = el.getAttribute('data-task-id');
+        const t = currentFilteredTasks.find(x => x.task_id === taskId);
+        if (!t) return;
+        
+        const top = parseFloat(el.style.top);
+        const height = parseFloat(el.style.height);
+        const left = parseFloat(el.style.left);
+        const width = parseFloat(el.style.width);
+        
+        const centerY = top + (height / 2);
+        const progress = parseInt(t.progress) || 0;
+        
+        const progX = left + (width * (progress / 100));
+        
+        tasksData.push({
+            id: taskId,
+            y: centerY,
+            progX: progX
+        });
+    });
+
+    tasksData.sort((a, b) => a.y - b.y);
+
+    if (tasksData.length > 0) {
+        const yGroups = {};
+        tasksData.forEach(t => {
+            const yKey = Math.round(t.y);
+            if (!yGroups[yKey]) yGroups[yKey] = [];
+            yGroups[yKey].push(t);
+        });
+
+        const sortedYKeys = Object.keys(yGroups).map(Number).sort((a, b) => a - b);
+        
+        // 直線を引くヘルパー関数
+        const drawLine = (x1, y1, x2, y2, color, isDash) => {
+            const line = document.createElementNS(svgNS, 'line');
+            line.setAttribute('x1', x1);
+            line.setAttribute('y1', y1);
+            line.setAttribute('x2', x2);
+            line.setAttribute('y2', y2);
+            line.setAttribute('stroke', color);
+            line.setAttribute('stroke-width', '2');
+            if (isDash) {
+                line.setAttribute('stroke-dasharray', '5 5');
+            }
+            svg.appendChild(line);
+        };
+        
+        let prevY = 0;
+        
+        sortedYKeys.forEach((yKey, index) => {
+            const group = yGroups[yKey];
+            const minProgX = Math.min(...group.map(t => t.progX));
+            const y = yKey;
+            
+            // 遅延量（日数）の計算
+            const diffX = Math.abs(todayX - minProgX);
+            const diffDays = diffX / ganttConfig.dayWidth;
+            
+            // 日数に応じてアルファ値（濃さ）を計算。最大14日で上限1.0、下限は0.3
+            let alpha = 0.3 + (diffDays / 14) * 0.7;
+            if (alpha > 1.0) alpha = 1.0;
+            
+            // 色の決定 (遅延=赤、順調/正常=青)
+            const color = minProgX < todayX ? `rgba(239, 68, 68, ${alpha})` : `rgba(59, 130, 246, ${alpha})`;
+            
+            // 7日（1週間）未満の差分なら破線とする
+            const isDash = diffDays < 7;
+            
+            // 基準線からタスクへの進入線
+            if (index === 0) {
+                drawLine(todayX, 0, minProgX, y, color, isDash);
+            } else {
+                const midY = prevY + (y - prevY) / 2;
+                drawLine(todayX, midY, minProgX, y, color, isDash);
+            }
+            
+            // タスクから基準線への退出線
+            if (index === sortedYKeys.length - 1) {
+                drawLine(minProgX, y, todayX, ganttHeight, color, isDash);
+            } else {
+                const nextY = sortedYKeys[index + 1];
+                const nextMidY = y + (nextY - y) / 2;
+                drawLine(minProgX, y, todayX, nextMidY, color, isDash);
+            }
+            
+            prevY = y;
+        });
+    }
+
+    container.appendChild(svg);
 }
 
 // --- Mouse Events & Dragging ---
@@ -2639,6 +2768,10 @@ JSONフォーマット:
     document.getElementById('filter-hide-completed').addEventListener('change', () => {
         renderGantt();
     });
+
+    if (els.toggleProgressLine) {
+        els.toggleProgressLine.addEventListener('change', renderProgressLine);
+    }
 
     // --- エクスポート(CSV/印刷)機能 ---
     const btnExportToggle = document.getElementById('btn-export-toggle');
