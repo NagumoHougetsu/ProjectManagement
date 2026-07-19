@@ -17,10 +17,14 @@ echo ビルドを開始します...
 pyinstaller --noconfirm --onefile --windowed --name "NagumoGantt" --add-data "templates;templates" --add-data "static;static" app.py
 
 echo.
+echo サンプルデータ(dataフォルダ)をdistフォルダにコピーしています...
+xcopy data dist\data /E /I /Y > nul
+
+echo.
 echo ========================================================
 echo.
 echo ビルドが完了しました！
-echo 「dist」フォルダの中に「NagumoGantt.exe」が作成されています。
-echo 会社での検証時は、この「app.exe」と「data」フォルダを一緒にZIPで固めて持っていくと確実です。（※--add-dataで内包していますが、読み書きするCSVフォルダは外に出しておく方が運用上安全な場合があります）
+echo 「dist」フォルダの中に「NagumoGantt.exe」と「data（サンプル同梱）」が作成されています。
+echo 会社やGitHubでの配布時は、この「dist」フォルダをそのまま丸ごとZIPで固めて配布するだけで、サンプルプロジェクトが入った状態で即座に動きます！
 echo.
 pause
