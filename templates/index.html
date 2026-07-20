@@ -128,8 +128,11 @@
         <div class="flex items-center space-x-2 text-xs">
             <!-- 保存ボタン & 未保存バッジ -->
             <span id="unsaved-badge" class="text-red-600 font-bold text-xs hidden animate-pulse">⚠️ 未保存の変更あり</span>
-            <button id="btn-save" class="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded font-bold shadow-sm transition text-xs flex items-center">
-                <span>💾 保存</span>
+            <button id="btn-discard" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-1.5 rounded font-bold shadow-sm transition text-xs flex items-center hidden">
+                <span>🔄 変更を破棄</span>
+            </button>
+            <button id="btn-save" class="bg-gray-400 text-white px-4 py-1.5 rounded font-bold shadow-sm transition text-xs flex items-center cursor-not-allowed" disabled>
+                <span>💾 変更を保存</span>
             </button>
         </div>
     </div>

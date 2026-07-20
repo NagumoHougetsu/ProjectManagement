@@ -252,8 +252,7 @@ async function switchProjectTab(p) {
     if (hasUnsavedChanges && !confirm('未保存の変更がありますが、プロジェクトを切り替えますか？')) return;
     
     currentProject = p;
-    hasUnsavedChanges = false;
-    els.unsavedBadge.classList.add('hidden');
+    setUnsavedState(false);
     renderTabs();
     await reloadData();
     const meLink = document.getElementById('master-editor-link');
@@ -274,8 +273,7 @@ function closeProjectTab(e, p) {
     
     renderTabs();
     if (currentProject) {
-        hasUnsavedChanges = false;
-        els.unsavedBadge.classList.add('hidden');
+        setUnsavedState(false);
         reloadData().then(() => {
             const meLink = document.getElementById('master-editor-link');
             if (meLink) meLink.href = `/master_editor?project=${currentProject}`;
@@ -556,9 +554,31 @@ async function reloadData() {
     renderGantt();
 }
 
+function setUnsavedState(isUnsaved) {
+    hasUnsavedChanges = isUnsaved;
+    const btnSave = document.getElementById('btn-save');
+    const btnDiscard = document.getElementById('btn-discard');
+    if (isUnsaved) {
+        els.unsavedBadge.classList.remove('hidden');
+        if (btnSave) {
+            btnSave.classList.remove('bg-gray-400', 'cursor-not-allowed');
+            btnSave.classList.add('bg-red-600', 'hover:bg-red-700');
+            btnSave.disabled = false;
+        }
+        if (btnDiscard) btnDiscard.classList.remove('hidden');
+    } else {
+        els.unsavedBadge.classList.add('hidden');
+        if (btnSave) {
+            btnSave.classList.remove('bg-red-600', 'hover:bg-red-700');
+            btnSave.classList.add('bg-gray-400', 'cursor-not-allowed');
+            btnSave.disabled = true;
+        }
+        if (btnDiscard) btnDiscard.classList.add('hidden');
+    }
+}
+
 function markUnsaved() {
-    hasUnsavedChanges = true;
-    els.unsavedBadge.classList.remove('hidden');
+    setUnsavedState(true);
 }
 
 function saveHistory() {
@@ -1499,6 +1519,10 @@ function setupMouseTracking() {
             return;
         }
         
+        selectedTaskIds.clear();
+        document.querySelectorAll('.gantt-task-item').forEach(el => el.classList.remove('selected'));
+        currentTaskContextId = null;
+        
         panState.isPanning = true;
         panState.startX = e.clientX;
         panState.startY = e.clientY;
@@ -1619,6 +1643,10 @@ function setupMouseTracking() {
             e.preventDefault();
             e.stopPropagation();
             
+            if (els.taskTooltip) {
+                els.taskTooltip.classList.add('hidden');
+            }
+            
             const taskEl = connector.closest('.gantt-task-item');
             if (!taskEl) return;
             const taskId = taskEl.getAttribute('data-task-id');
@@ -1646,6 +1674,9 @@ function setupMouseTracking() {
         const deadlineMarker = e.target.closest('.gantt-deadline-marker');
         if (deadlineMarker) {
             e.preventDefault(); // ネイティブドラッグを防止
+            if (els.taskTooltip) {
+                els.taskTooltip.classList.add('hidden');
+            }
             dragState.isDragging = true;
             dragState.mode = 'move-deadline';
             dragState.element = deadlineMarker;
@@ -1664,6 +1695,9 @@ function setupMouseTracking() {
         if (groupBar && !e.target.closest('.cursor-pointer')) {
             e.preventDefault();
             e.stopPropagation();
+            if (els.taskTooltip) {
+                els.taskTooltip.classList.add('hidden');
+            }
             dragState.isDragging = true;
             dragState.mode = 'move-group';
             dragState.element = groupBar;
@@ -2444,6 +2478,16 @@ function setupMiscEvents() {
     document.getElementById('btn-undo').addEventListener('click', performUndo);
     document.getElementById('btn-redo').addEventListener('click', performRedo);
 
+    const btnDiscard = document.getElementById('btn-discard');
+    if (btnDiscard) {
+        btnDiscard.addEventListener('click', () => {
+            if (confirm('未保存の変更を破棄して、プロジェクトをリロードしますか？')) {
+                setUnsavedState(false);
+                reloadData();
+            }
+        });
+    }
+
     document.getElementById('btn-save').addEventListener('click', async () => {
         try {
             const res = await fetch(`/api/tasks/save?project=${currentProject}`, {
@@ -2497,8 +2541,7 @@ function setupMiscEvents() {
             const resultDeadlines = await resDeadlines.json();
             
             if (result.status === 'success' && resultDeadlines.status === 'success') {
-                hasUnsavedChanges = false;
-                els.unsavedBadge.classList.add('hidden');
+                setUnsavedState(false);
                 alert('保存が完了しました。');
             } else {
                 alert('エラー: ' + result.message + ' / ' + resultDeadlines.message);
