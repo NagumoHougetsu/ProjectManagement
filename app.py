@@ -34,6 +34,7 @@ else:
 
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 PROJECTS_DIR = os.path.join(DATA_DIR, 'projects')
+COMMON_DIR = os.path.join(DATA_DIR, 'common')
 
 def get_project_dir(project_name):
     if not project_name:
@@ -67,7 +68,33 @@ def add_header(response):
 
 @app.route('/')
 def index():
-    return render_template('index.html', ts=int(time.time()))
+    prompt_path = os.path.join(COMMON_DIR, 'prompt_system.txt')
+    default_prompt = ""
+    if os.path.exists(prompt_path):
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            default_prompt = f.read()
+    else:
+        default_prompt = """あなたは優秀なプロジェクト管理アシスタントです。
+アジャイル開発やウォーターフォール開発の手法に精通しており、PMBOKの知識（スコープ管理、スケジュール管理、リソース管理、リスク管理など）を深く理解しています。プロジェクトマネジメントのプロフェッショナルとして、論理的かつ実践的な視点からアドバイスを行います。
+
+ユーザーからスケジュールの調整・変更・提案を求められた場合は、プロジェクトマネジメントのベストプラクティスに基づいた日本語の解説文とともに、変更後のスケジュールデータを以下のJSON形式のコードブロック（ ```json ... ``` ）で「必ず」出力してください。
+
+[出力形式]
+```json
+[
+  {
+    "id": "タスクID（例: TSK_00001）",
+    "start": "新しい開始日（YYYY-MM-DD）",
+    "end": "新しい終了日（YYYY-MM-DD）"
+  }
+]
+```"""
+        # ファイルが存在しない場合は作成しておく
+        os.makedirs(COMMON_DIR, exist_ok=True)
+        with open(prompt_path, 'w', encoding='utf-8') as f:
+            f.write(default_prompt)
+
+    return render_template('index.html', ts=int(time.time()), default_system_prompt=default_prompt)
 
 @app.route('/master_editor')
 def master_editor():

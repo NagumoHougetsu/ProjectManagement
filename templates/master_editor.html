@@ -12,7 +12,14 @@
 <body class="bg-gray-100 h-screen flex flex-col">
     <header class="bg-gray-800 text-white p-4 flex justify-between items-center shadow-md">
         <h1 class="text-xl font-bold">マスタデータ管理エディタ</h1>
-        <button id="btn-save-masters" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded font-bold shadow transition">全マスタ保存</button>
+        <div class="flex space-x-3 items-center">
+            <input type="file" id="csv-upload" accept=".csv" class="hidden" />
+            <button id="btn-import-csv" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded font-bold shadow transition flex items-center">
+                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                CSVインポート
+            </button>
+            <button id="btn-save-masters" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded font-bold shadow transition">全マスタ保存</button>
+        </div>
     </header>
 
     <div class="flex flex-1 overflow-hidden">
@@ -188,6 +195,104 @@
                 currentTab = e.target.dataset.target;
                 renderTable();
             });
+        });
+
+        function parseCSV(csvText) {
+            const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length < 2) return [];
+            
+            const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+            
+            const result = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = [];
+                let inQuote = false;
+                let currentValue = '';
+                const line = lines[i];
+                
+                for (let j = 0; j < line.length; j++) {
+                    const char = line[j];
+                    if (char === '"') {
+                        inQuote = !inQuote;
+                    } else if (char === ',' && !inQuote) {
+                        values.push(currentValue);
+                        currentValue = '';
+                    } else {
+                        currentValue += char;
+                    }
+                }
+                values.push(currentValue);
+                
+                const row = {};
+                headers.forEach((header, index) => {
+                    row[header] = values[index] !== undefined ? values[index].trim().replace(/^"|"$/g, '') : '';
+                });
+                result.push(row);
+            }
+            return result;
+        }
+
+        document.getElementById('btn-import-csv').addEventListener('click', () => {
+            document.getElementById('csv-upload').click();
+        });
+
+        document.getElementById('csv-upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                let text = event.target.result;
+                
+                if (text.charCodeAt(0) === 0xFEFF) {
+                    text = text.slice(1);
+                }
+
+                try {
+                    const parsedData = parseCSV(text);
+                    
+                    if (parsedData.length > 0) {
+                        const schema = schemas[currentTab];
+                        const newMasterData = [];
+                        
+                        parsedData.forEach(row => {
+                            const newRow = {};
+                            schema.forEach(col => {
+                                let val = row[col] !== undefined ? row[col] : '';
+                                // 日付の変換 (YYYY/MM/DD -> YYYY-MM-DD)
+                                if (val && (col.includes('date') || col.includes('deadline'))) {
+                                    if (val.includes('/')) {
+                                        const parts = val.split('/');
+                                        if (parts.length === 3) {
+                                            const y = parts[0];
+                                            const m = parts[1].padStart(2, '0');
+                                            const d = parts[2].padStart(2, '0');
+                                            val = `${y}-${m}-${d}`;
+                                        } else {
+                                            val = val.replace(/\//g, '-');
+                                        }
+                                    }
+                                }
+                                newRow[col] = val;
+                            });
+                            newMasterData.push(newRow);
+                        });
+
+                        mastersData[currentTab] = newMasterData;
+                        renderTable();
+                        alert(`${currentTab} タブに ${newMasterData.length} 件のデータをインポートしました。\n※まだ保存されていません。「全マスタ保存」を押して確定してください。`);
+                    } else {
+                        alert('CSVファイルにデータがありません。');
+                    }
+                } catch (err) {
+                    console.error(err);
+                    alert('CSVの読み込みに失敗しました。フォーマットを確認してください。');
+                }
+                
+                e.target.value = '';
+            };
+            
+            reader.readAsText(file, 'utf-8');
         });
 
         document.getElementById('btn-save-masters').addEventListener('click', async () => {

@@ -392,19 +392,7 @@
                     </div>
                     <div>
                         <label class="block font-bold mb-1">System Prompt</label>
-                        <textarea id="ai-system-prompt" class="w-full border rounded p-2 text-sm" rows="6" placeholder="AIの役割などを入力...">あなたは優秀なプロジェクト管理アシスタントです。
-ユーザーからスケジュールの調整・変更・提案を求められた場合は、日本語の解説文とともに、変更後のスケジュールデータを以下のJSON形式のコードブロック（ ```json ... ``` ）で「必ず」出力してください。
-
-[出力形式]
-```json
-[
-  {
-    "id": "タスクID（例: TSK_00001）",
-    "start": "新しい開始日（YYYY-MM-DD）",
-    "end": "新しい終了日（YYYY-MM-DD）"
-  }
-]
-```</textarea>
+                        <textarea id="ai-system-prompt" class="w-full border rounded p-2 text-sm" rows="6" placeholder="AIの役割などを入力...">{{ default_system_prompt }}</textarea>
                     </div>
                 </div>
                 <div class="p-4 border-t flex justify-end space-x-2 bg-gray-50 rounded-b-lg">

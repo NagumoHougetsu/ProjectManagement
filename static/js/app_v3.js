@@ -3301,7 +3301,7 @@ function setupMiscEvents() {
             }
 
             // 送信用システムプロンプトの構築
-            let sysPrompt = aiSettings.systemPrompt || 'あなたはプロジェクト管理アシスタントです。';
+            let sysPrompt = aiSettings.systemPrompt || document.getElementById('ai-system-prompt').value || 'あなたはプロジェクト管理アシスタントです。';
             sysPrompt += getContextTextForSession(session);
 
             // 【常時追加されるシステムコアプロンプト】
