@@ -256,6 +256,13 @@ def get_llm_models():
             with urllib.request.urlopen(req) as response:
                 res_data = json.loads(response.read().decode('utf-8'))
                 models = [m['name'].replace('models/', '') for m in res_data.get('models', []) if 'generateContent' in m.get('supportedGenerationMethods', [])]
+        elif provider == 'claude':
+            req = urllib.request.Request("https://api.anthropic.com/v1/models")
+            req.add_header("x-api-key", api_key)
+            req.add_header("anthropic-version", "2023-06-01")
+            with urllib.request.urlopen(req) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                models = [m['id'] for m in res_data.get('data', []) if m.get('type') == 'model']
         else:
             return jsonify({"status": "error", "message": "このプロバイダは動的取得に対応していません。"}), 400
             
@@ -266,7 +273,90 @@ def get_llm_models():
         return jsonify({"status": "error", "message": str(e)}), 500
 
     models.sort(reverse=True) # 新しいモデルが上に来るように簡易ソート
+
+    # 動的取得したモデル一覧と既存のCSV価格マスタを比較し、未知のモデルがあれば単価 0.0 として自動追記
+    try:
+        import csv
+        import os
+        csv_path = os.path.join("data", "common", "m_llm_pricing.csv")
+        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        existing_models = set()
+        rows = []
+        fieldnames = ["model_name", "input_cost_1m", "output_cost_1m", "provider"]
+        if os.path.exists(csv_path):
+            with open(csv_path, "r", newline="", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                if reader.fieldnames:
+                    fieldnames = reader.fieldnames
+                for row in reader:
+                    existing_models.add(row.get("model_name", "").strip())
+                    rows.append(row)
+        
+        added_new = False
+        provider_name_map = {'openai': 'OpenAI', 'claude': 'Anthropic', 'gemini': 'Google'}
+        provider_name = provider_name_map.get(provider, 'Unknown')
+        
+        for m in models:
+            if m not in existing_models:
+                rows.append({
+                    "model_name": m,
+                    "input_cost_1m": "0.0",
+                    "output_cost_1m": "0.0",
+                    "provider": provider_name
+                })
+                added_new = True
+                
+        if added_new:
+            with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+    except Exception as e:
+        print(f"価格マスタの自動更新に失敗しました: {e}")
+
     return jsonify({"status": "success", "models": models})
+
+DEFAULT_PRICING = [
+    # model_name, input_cost_1m, output_cost_1m, provider
+    ("USD_JPY", 155.00, 155.00, "SYSTEM"),
+    # ※モデルの追加・編集は data/common/m_llm_pricing.csv を直接編集してください
+]
+
+PRICING_CSV_PATH = os.path.join("data", "common", "m_llm_pricing.csv")
+
+@app.route('/api/llm/pricing', methods=['GET'])
+def get_llm_pricing():
+    import csv
+    os.makedirs(os.path.dirname(PRICING_CSV_PATH), exist_ok=True)
+    
+    if not os.path.exists(PRICING_CSV_PATH):
+        try:
+            with open(PRICING_CSV_PATH, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                writer.writerow(["model_name", "input_cost_1m", "output_cost_1m", "provider"])
+                for row in DEFAULT_PRICING:
+                    writer.writerow(row)
+        except Exception as e:
+            return jsonify({"status": "error", "message": f"デフォルト価格表の作成に失敗しました: {str(e)}"}), 500
+
+    pricing_list = []
+    try:
+        with open(PRICING_CSV_PATH, "r", newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    pricing_list.append({
+                        "model_name": row["model_name"].strip(),
+                        "input_cost_1m": float(row["input_cost_1m"]),
+                        "output_cost_1m": float(row["output_cost_1m"]),
+                        "provider": row["provider"].strip()
+                    })
+                except (ValueError, KeyError):
+                    continue
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"価格表の読み込みに失敗しました: {str(e)}"}), 500
+
+    return jsonify({"status": "success", "pricing": pricing_list})
 
 @app.route('/api/llm/chat', methods=['POST'])
 def ai_chat_proxy():
@@ -285,164 +375,26 @@ def ai_chat_proxy():
     try:
         reply_text = ""
         total_tokens = 0
-
-        # 画像データを各プロバイダのフォーマットに合わせて最後のユーザーメッセージに追加する
-        # (システムプロンプトと一緒に渡すことはできない場合が多いのでユーザーメッセージに入れる)
-        def append_images_to_last_user_message_openai(msgs, imgs):
-            if not imgs: return msgs
-            last_user_idx = -1
-            for i in range(len(msgs)-1, -1, -1):
-                if msgs[i]['role'] == 'user':
-                    last_user_idx = i
-                    break
-            
-            if last_user_idx != -1:
-                original_content = msgs[last_user_idx]['content']
-                new_content = [{"type": "text", "text": original_content}]
-                for img in imgs:
-                    new_content.append({"type": "image_url", "image_url": {"url": img}})
-                msgs[last_user_idx]['content'] = new_content
-            return msgs
-
-        def append_images_to_last_user_message_claude(msgs, imgs):
-            if not imgs: return msgs
-            last_user_idx = -1
-            for i in range(len(msgs)-1, -1, -1):
-                if msgs[i]['role'] == 'user':
-                    last_user_idx = i
-                    break
-            
-            if last_user_idx != -1:
-                original_content = msgs[last_user_idx]['content']
-                new_content = [{"type": "text", "text": original_content}]
-                for img in imgs:
-                    if ',' in img:
-                        header, b64data = img.split(',', 1)
-                        media_type = header.split(':')[1].split(';')[0]
-                        new_content.append({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": b64data
-                            }
-                        })
-                msgs[last_user_idx]['content'] = new_content
-            return msgs
+        input_tokens = 0
+        output_tokens = 0
 
         if provider == 'openai':
-            # OpenAI API Format
-            api_url = "https://api.openai.com/v1/chat/completions"
-            payload_messages = []
-            if system_prompt:
-                payload_messages.append({"role": "system", "content": system_prompt})
-            
-            # クローンして画像を追加
-            cloned_messages = [dict(m) for m in messages]
-            cloned_messages = append_images_to_last_user_message_openai(cloned_messages, images)
-            payload_messages.extend(cloned_messages)
-            
-            payload = {
-                "model": model,
-                "messages": payload_messages,
-                "temperature": temperature
-            }
-            req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
-            req.add_header("Authorization", f"Bearer {api_key}")
-            req.add_header("Content-Type", "application/json")
-            
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                reply_text = res_data['choices'][0]['message']['content']
-                total_tokens = res_data.get('usage', {}).get('total_tokens', 0)
-
+            reply_text, input_tokens, output_tokens, total_tokens = _handle_openai_chat(
+                model, messages, system_prompt, temperature, images, api_key)
         elif provider == 'claude':
-            # Anthropic API Format (Messages API)
-            api_url = "https://api.anthropic.com/v1/messages"
-            
-            cloned_messages = [dict(m) for m in messages]
-            cloned_messages = append_images_to_last_user_message_claude(cloned_messages, images)
-            
-            payload = {
-                "model": model,
-                "max_tokens": 4096,
-                "temperature": temperature,
-                "system": system_prompt,
-                "messages": cloned_messages
-            }
-            req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
-            req.add_header("x-api-key", api_key)
-            req.add_header("anthropic-version", "2023-06-01")
-            req.add_header("Content-Type", "application/json")
-            
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                reply_text = res_data['content'][0]['text']
-                total_tokens = res_data.get('usage', {}).get('input_tokens', 0) + res_data.get('usage', {}).get('output_tokens', 0)
-
+            reply_text, input_tokens, output_tokens, total_tokens = _handle_claude_chat(
+                model, messages, system_prompt, temperature, images, api_key)
         elif provider == 'gemini':
-            # Gemini API Format
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            gemini_messages = []
-            
-            for idx, msg in enumerate(messages):
-                parts = [{"text": msg['content']}]
-                
-                # 最後のユーザーメッセージに画像を追加
-                is_last_user = False
-                if msg['role'] == 'user':
-                    # 後ろにユーザーメッセージがないか確認
-                    is_last = True
-                    for j in range(idx + 1, len(messages)):
-                        if messages[j]['role'] == 'user':
-                            is_last = False
-                            break
-                    if is_last:
-                        is_last_user = True
-                
-                if is_last_user and images:
-                    for img in images:
-                        if ',' in img:
-                            header, b64data = img.split(',', 1)
-                            mime_type = header.split(':')[1].split(';')[0]
-                            parts.append({
-                                "inline_data": {
-                                    "mime_type": mime_type,
-                                    "data": b64data
-                                }
-                            })
-
-                gemini_messages.append({
-                    "role": "user" if msg['role'] == "user" else "model",
-                    "parts": parts
-                })
-                
-            payload = {
-                "contents": gemini_messages,
-                "generationConfig": {
-                    "temperature": temperature
-                }
-            }
-            if system_prompt:
-                payload["systemInstruction"] = {
-                    "parts": [{"text": system_prompt}]
-                }
-
-            req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
-            req.add_header("Content-Type", "application/json")
-            
-            with urllib.request.urlopen(req) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                reply_text = res_data['candidates'][0]['content']['parts'][0]['text']
-                total_tokens = res_data.get('usageMetadata', {}).get('totalTokenCount', 0)
-
+            reply_text, input_tokens, output_tokens, total_tokens = _handle_gemini_chat(
+                model, messages, system_prompt, temperature, images, api_key)
         else:
-            return jsonify({"status": "error", "message": "不明なプロバイダです。"}), 400
-
+            return jsonify({"status": "error", "message": f"不明なプロバイダです: {provider}"}), 400
         return jsonify({
             "status": "success",
             "reply": reply_text,
-            "tokens": total_tokens
+            "tokens": total_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
         })
         
     except urllib.error.HTTPError as e:
@@ -450,6 +402,147 @@ def ai_chat_proxy():
         return jsonify({"status": "error", "message": f"APIエラー ({e.code}): {error_msg}"}), 400
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+
+# --- LLM Provider Handlers ---
+
+def _get_last_user_msg_idx(msgs):
+    for i in range(len(msgs)-1, -1, -1):
+        if msgs[i]['role'] == 'user':
+            return i
+    return -1
+
+def _handle_openai_chat(model, messages, system_prompt, temperature, images, api_key):
+    import urllib.request, json
+    api_url = "https://api.openai.com/v1/chat/completions"
+    payload_messages = []
+    if system_prompt:
+        payload_messages.append({"role": "system", "content": system_prompt})
+    
+    cloned_messages = [dict(m) for m in messages]
+    if images:
+        last_idx = _get_last_user_msg_idx(cloned_messages)
+        if last_idx != -1:
+            original_content = cloned_messages[last_idx]['content']
+            new_content = [{"type": "text", "text": original_content}]
+            for img in images:
+                new_content.append({"type": "image_url", "image_url": {"url": img}})
+            cloned_messages[last_idx]['content'] = new_content
+            
+    payload_messages.extend(cloned_messages)
+    payload = {
+        "model": model,
+        "messages": payload_messages,
+        "temperature": temperature
+    }
+    
+    req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
+    req.add_header("Authorization", f"Bearer {api_key}")
+    req.add_header("Content-Type", "application/json")
+    
+    with urllib.request.urlopen(req) as response:
+        res_data = json.loads(response.read().decode('utf-8'))
+        reply_text = res_data['choices'][0]['message']['content']
+        total_tokens = res_data.get('usage', {}).get('total_tokens', 0)
+        input_tokens = res_data.get('usage', {}).get('prompt_tokens', 0)
+        output_tokens = res_data.get('usage', {}).get('completion_tokens', 0)
+    return reply_text, input_tokens, output_tokens, total_tokens
+
+def _handle_claude_chat(model, messages, system_prompt, temperature, images, api_key):
+    import urllib.request, json
+    api_url = "https://api.anthropic.com/v1/messages"
+    cloned_messages = [dict(m) for m in messages]
+    
+    if images:
+        last_idx = _get_last_user_msg_idx(cloned_messages)
+        if last_idx != -1:
+            original_content = cloned_messages[last_idx]['content']
+            new_content = [{"type": "text", "text": original_content}]
+            for img in images:
+                if ',' in img:
+                    header, b64data = img.split(',', 1)
+                    media_type = header.split(':')[1].split(';')[0]
+                    new_content.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": b64data
+                        }
+                    })
+            cloned_messages[last_idx]['content'] = new_content
+            
+    payload = {
+        "model": model,
+        "max_tokens": 4096,
+        "temperature": temperature,
+        "messages": cloned_messages
+    }
+    if system_prompt:
+        payload["system"] = system_prompt
+        
+    req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
+    req.add_header("x-api-key", api_key)
+    req.add_header("anthropic-version", "2023-06-01")
+    req.add_header("Content-Type", "application/json")
+    
+    with urllib.request.urlopen(req) as response:
+        res_data = json.loads(response.read().decode('utf-8'))
+        reply_text = res_data['content'][0]['text']
+        input_tokens = res_data.get('usage', {}).get('input_tokens', 0)
+        output_tokens = res_data.get('usage', {}).get('output_tokens', 0)
+        total_tokens = input_tokens + output_tokens
+    return reply_text, input_tokens, output_tokens, total_tokens
+
+def _handle_gemini_chat(model, messages, system_prompt, temperature, images, api_key):
+    import urllib.request, json
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    gemini_messages = []
+    
+    last_user_idx = _get_last_user_msg_idx(messages)
+    
+    for idx, msg in enumerate(messages):
+        parts = [{"text": msg['content']}]
+        
+        if idx == last_user_idx and images:
+            for img in images:
+                if ',' in img:
+                    header, b64data = img.split(',', 1)
+                    mime_type = header.split(':')[1].split(';')[0]
+                    parts.append({
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": b64data
+                        }
+                    })
+
+        gemini_messages.append({
+            "role": "user" if msg['role'] == "user" else "model",
+            "parts": parts
+        })
+        
+    payload = {
+        "contents": gemini_messages,
+        "generationConfig": {
+            "temperature": temperature
+        }
+    }
+    if system_prompt:
+        payload["systemInstruction"] = {
+            "parts": [{"text": system_prompt}]
+        }
+
+    req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
+    req.add_header("Content-Type", "application/json")
+    
+    with urllib.request.urlopen(req) as response:
+        res_data = json.loads(response.read().decode('utf-8'))
+        reply_text = res_data['candidates'][0]['content']['parts'][0]['text']
+        input_tokens = res_data.get('usageMetadata', {}).get('promptTokenCount', 0)
+        output_tokens = res_data.get('usageMetadata', {}).get('candidatesTokenCount', 0)
+        total_tokens = res_data.get('usageMetadata', {}).get('totalTokenCount', 0)
+    return reply_text, input_tokens, output_tokens, total_tokens
 
 
 if __name__ == '__main__':

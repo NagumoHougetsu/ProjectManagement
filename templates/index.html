@@ -383,6 +383,11 @@
                         <input type="number" id="ai-max-retries" min="0" max="10" value="3" class="w-full border rounded p-2 text-sm">
                     </div>
                     <div>
+                        <label class="block font-bold mb-1">ドル円為替レート (USD/JPY)</label>
+                        <input type="number" id="ai-usd-jpy-rate" min="50" max="300" value="155" class="w-full border rounded p-2 text-sm" placeholder="155">
+                        <p class="text-xs text-gray-500 mt-1">※消費金額を日本円に換算する際の計算レートです。</p>
+                    </div>
+                    <div>
                         <label class="block font-bold mb-1">System Prompt</label>
                         <textarea id="ai-system-prompt" class="w-full border rounded p-2 text-sm" rows="6" placeholder="AIの役割などを入力...">あなたは優秀なプロジェクト管理アシスタントです。
 ユーザーからスケジュールの調整・変更・提案を求められた場合は、日本語の解説文とともに、変更後のスケジュールデータを以下のJSON形式のコードブロック（ ```json ... ``` ）で「必ず」出力してください。

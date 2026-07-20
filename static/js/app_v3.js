@@ -10,6 +10,101 @@ window.addEventListener('error', function(e) {
     serverLog('ERROR', "Message: " + e.message + " | File: " + e.filename + " | Line: " + e.lineno);
 });
 
+// --- LLM Model Pricing & Cost Calculation ---
+let MODEL_PRICING = {};
+let MASTER_MODELS = { openai: [], claude: [], gemini: [] };
+
+async function fetchLlmPricing() {
+    try {
+        const res = await fetch('/api/llm/pricing');
+        const data = await res.json();
+        if (data.status === 'success' && data.pricing) {
+            MODEL_PRICING = {};
+            MASTER_MODELS = { openai: [], claude: [], gemini: [] };
+            data.pricing.forEach(item => {
+                MODEL_PRICING[item.model_name] = {
+                    input: item.input_cost_1m,
+                    output: item.output_cost_1m,
+                    provider: item.provider
+                };
+                if (item.model_name !== 'USD_JPY') {
+                    const prov = item.provider.toLowerCase();
+                    if (prov.includes('openai')) {
+                        MASTER_MODELS.openai.push(item.model_name);
+                    } else if (prov.includes('anthropic') || prov.includes('claude')) {
+                        MASTER_MODELS.claude.push(item.model_name);
+                    } else if (prov.includes('google') || prov.includes('gemini')) {
+                        MASTER_MODELS.gemini.push(item.model_name);
+                    }
+                }
+            });
+        }
+    } catch (e) {
+        console.error('LLM価格表のフェッチに失敗しました。デフォルトの推定ロジックのみ動作します。', e);
+    }
+}
+
+function getModelPricing(modelName) {
+    if (!modelName) return null;
+    const nameLower = modelName.toLowerCase();
+    
+    // 完全一致
+    if (MODEL_PRICING[modelName]) return MODEL_PRICING[modelName];
+    
+    // 小文字
+    for (const key of Object.keys(MODEL_PRICING)) {
+        if (key.toLowerCase() === nameLower) {
+            return MODEL_PRICING[key];
+        }
+    }
+    
+    // 部分一致
+    for (const key of Object.keys(MODEL_PRICING)) {
+        const keyLower = key.toLowerCase();
+        if (nameLower.includes(keyLower) || keyLower.includes(nameLower)) {
+            return MODEL_PRICING[key];
+        }
+    }
+    
+    return null;
+}
+
+function getUsdJpyRate() {
+    if (MODEL_PRICING && MODEL_PRICING['USD_JPY']) {
+        return MODEL_PRICING['USD_JPY'].input;
+    }
+    return 155;
+}
+
+function calculateCost(modelName, tokens, inputTokens, outputTokens, rate = null) {
+    const pricing = getModelPricing(modelName);
+    if (!pricing) return null;
+    
+    const finalRate = rate || getUsdJpyRate();
+    
+    let inT = inputTokens;
+    let outT = outputTokens;
+    
+    if (inT === undefined || outT === undefined || inT === null || outT === null) {
+        // tokens のみある場合の推定
+        inT = Math.round(tokens * 0.8);
+        outT = tokens - inT;
+    }
+    
+    const inputCost = (inT / 1000000) * pricing.input;
+    const outputCost = (outT / 1000000) * pricing.output;
+    const totalCostUSD = inputCost + outputCost;
+    const totalCostJPY = totalCostUSD * finalRate;
+    
+    return {
+        usd: totalCostUSD,
+        jpy: totalCostJPY,
+        pricing: pricing,
+        inputTokens: inT,
+        outputTokens: outT
+    };
+}
+
 // --- State ---
 let masters = {};
 let allTasksRaw = [];
@@ -65,6 +160,7 @@ let insertTargetIndex = -1; // 新規タスク挿入位置
 
 // --- Initialization ---
 async function init() {
+    await fetchLlmPricing();
     await fetchProjects();
     await reloadData();
     setupScrollSync();
@@ -2537,14 +2633,48 @@ function setupMiscEvents() {
             aiNoSessionsMsg.classList.remove('hidden');
         } else {
             aiNoSessionsMsg.classList.add('hidden');
+            
+            const settings = JSON.parse(localStorage.getItem('ai_settings') || '{}');
+            const rate = settings.usdJpyRate || getUsdJpyRate();
+
             // 降順（新しい順）で表示
             sessions.reverse().forEach(session => {
+                // セッションごとの合計コスト計算
+                let totalCostUSD = session.totalCostUSD || 0;
+                let totalCostJPY = session.totalCostJPY || 0;
+                let hasUnregisteredModel = false;
+                
+                if (session.messages) {
+                    session.messages.forEach(m => {
+                        if (m.role === 'assistant' && m.tokens) {
+                            const cost = calculateCost(m.model || settings.model, m.tokens, m.input_tokens, m.output_tokens, rate);
+                            if (cost) {
+                                if (!session.totalCostUSD) {
+                                    totalCostUSD += cost.usd;
+                                    totalCostJPY += cost.jpy;
+                                }
+                            } else {
+                                hasUnregisteredModel = true;
+                            }
+                        }
+                    });
+                }
+                let costDisplay = '';
+                if (totalCostUSD > 0) {
+                    costDisplay = ` / 約 $${totalCostUSD.toFixed(4)} (${totalCostJPY.toFixed(1)}円)`;
+                    if (hasUnregisteredModel) {
+                        costDisplay += '*';
+                    }
+                } else if (hasUnregisteredModel) {
+                    costDisplay = ` / 💸 - (価格未登録)`;
+                }
+
                 const div = document.createElement('div');
                 div.className = 'bg-white border rounded p-3 shadow-sm hover:shadow-md transition cursor-pointer flex flex-col relative group';
                 div.innerHTML = `
                     <div class="font-bold text-gray-800 text-sm mb-1 truncate pr-6">${session.title || '無題のセッション'}</div>
                     <div class="text-xs text-gray-500 mb-1">期間: ${session.startDate} 〜 ${session.endDate}</div>
-                    <div class="text-xs text-blue-600 font-bold">消費トークン: ${session.totalTokens || 0}</div>
+                    <div class="text-xs text-blue-600 font-bold">消費トークン: ${session.totalTokens || 0}${costDisplay}</div>
                     <button class="absolute top-2 right-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition btn-delete-session" data-id="${session.id}" title="削除">🗑️</button>
                 `;
                 // セッションクリックで開く
@@ -2761,14 +2891,33 @@ function setupMiscEvents() {
                 if (msg.tokens || msg.responseTime) {
                     const timeStr = msg.timestamp ? ` [${msg.timestamp}]` : '';
                     const respTimeStr = msg.responseTime ? ` (応答時間: ${msg.responseTime}秒)` : '';
-                    const tokenStr = msg.tokens ? ` (消費: ${msg.tokens} tokens)` : '';
+                    
+                    let tokenStr = msg.tokens ? `消費: ${msg.tokens} tokens` : '';
+                    if (msg.input_tokens !== undefined && msg.output_tokens !== undefined) {
+                        tokenStr = `消費: ${msg.tokens} tokens (In: ${msg.input_tokens} / Out: ${msg.output_tokens})`;
+                    }
+                    
+                    // コスト計算
+                    let costStr = '';
+                    const settings = JSON.parse(localStorage.getItem('ai_settings') || '{}');
+                    const rate = settings.usdJpyRate || getUsdJpyRate();
+                    const modelName = msg.model || settings.model;
+                    
+                    const costObj = calculateCost(modelName, msg.tokens, msg.input_tokens, msg.output_tokens, rate);
+                    if (costObj) {
+                        const usdFormated = costObj.usd < 0.01 ? costObj.usd.toFixed(5) : costObj.usd.toFixed(4);
+                        const jpyFormated = costObj.jpy < 0.1 ? costObj.jpy.toFixed(3) : costObj.jpy.toFixed(2);
+                        costStr = ` | 💸 約 $${usdFormated} (${jpyFormated}円 @${rate})`;
+                    } else {
+                        costStr = ` | 💸 - (価格未登録)`;
+                    }
+                    
+                    const modelBadge = modelName ? `<span class="bg-gray-200 text-gray-600 px-1 rounded mr-1 text-[9px] font-mono">${modelName}</span>` : '';
                     
                     tokenFooter = `
 <div class="mt-2 border-t pt-1 text-[10px] text-gray-400 font-semibold flex justify-between items-center select-none">
-  <span>🪙${tokenStr}${respTimeStr}${timeStr}</span>
+  <span>🪙 ${modelBadge}${tokenStr}${costStr}${respTimeStr}${timeStr}</span>
 </div>`;
-
-
                 }
 
                 messageHTML = `<div class="bg-gray-100 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] ai-markdown-content">${parsedContent}${tokenFooter}</div>`;
@@ -3071,7 +3220,12 @@ function setupMiscEvents() {
             }
 
             // 送信用メッセージ履歴をディープコピーして、会話メッセージ（user/assistant）のみにフィルタリング
-            let sendMessages = JSON.parse(JSON.stringify(session.messages.filter(m => m.role === 'user' || m.role === 'assistant')));
+            let sendMessages = session.messages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => {
+                return {
+                    role: m.role,
+                    content: m.content
+                };
+            });
             if (sendMessages.length > 0) {
                 sendMessages[sendMessages.length - 1].content = sendContent;
             }
@@ -3149,15 +3303,24 @@ function setupMiscEvents() {
                 const elapsedSeconds = ((endTime - startTime) / 1000).toFixed(1);
                 const currentTimeStr = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+                const rate = aiSettings.usdJpyRate || getUsdJpyRate();
                 session.messages.push({ 
                     role: 'assistant', 
                     content: finalReply, 
                     tokens: finalTokens,
+                    input_tokens: data1.input_tokens,
+                    output_tokens: data1.output_tokens,
+                    model: aiSettings.model,
                     responseTime: elapsedSeconds,
                     timestamp: currentTimeStr
                 });
 
                 session.totalTokens = (session.totalTokens || 0) + finalTokens;
+                const costObj = calculateCost(aiSettings.model, finalTokens, data1.input_tokens, data1.output_tokens, rate);
+                if (costObj) {
+                    session.totalCostUSD = (session.totalCostUSD || 0) + costObj.usd;
+                    session.totalCostJPY = (session.totalCostJPY || 0) + costObj.jpy;
+                }
                 renderAiChatMessages(session.messages);
 
                 if (btnRemoveAttachment) btnRemoveAttachment.click();
@@ -3347,6 +3510,11 @@ function setupMiscEvents() {
             }
             if (settings.systemPrompt) aiSystemPrompt.value = settings.systemPrompt;
             if (settings.maxRetries !== undefined) document.getElementById('ai-max-retries').value = settings.maxRetries;
+            if (settings.usdJpyRate !== undefined) {
+                document.getElementById('ai-usd-jpy-rate').value = settings.usdJpyRate;
+            } else {
+                document.getElementById('ai-usd-jpy-rate').value = getUsdJpyRate();
+            }
             
             // プロバイダ変更時のUI切り替え
             aiProvider.dispatchEvent(new Event('change'));
@@ -3354,19 +3522,18 @@ function setupMiscEvents() {
             // もしモデルが保存されていればセット
             if (settings.model) {
                 setTimeout(() => {
-                    if (aiProvider.value === 'claude') {
-                        aiModelManual.value = settings.model;
-                    } else {
-                        // TODO: リスト動的取得まではoptionに追加しておく
-                        if (!Array.from(aiModelSelect.options).some(opt => opt.value === settings.model)) {
-                            const opt = document.createElement('option');
-                            opt.value = settings.model;
-                            opt.textContent = settings.model;
-                            aiModelSelect.appendChild(opt);
-                        }
+                    const hasOption = Array.from(aiModelSelect.options).some(opt => opt.value === settings.model);
+                    if (hasOption) {
                         aiModelSelect.value = settings.model;
+                    } else {
+                        aiModelSelect.value = '__MANUAL__';
+                        aiModelManual.value = settings.model;
                     }
+                    triggerModelInputVisibility();
                 }, 50);
+            } else {
+                aiModelSelect.value = aiModelSelect.options[0] ? aiModelSelect.options[0].value : '__MANUAL__';
+                triggerModelInputVisibility();
             }
         });
     }
@@ -3374,18 +3541,43 @@ function setupMiscEvents() {
     // プロバイダ変更イベント
     if (aiProvider) {
         aiProvider.addEventListener('change', () => {
-            if (aiProvider.value === 'claude') {
-                aiModelSelect.classList.add('hidden');
-                aiModelManual.classList.remove('hidden');
-                document.getElementById('btn-fetch-models').disabled = true;
-                document.getElementById('btn-fetch-models').classList.add('opacity-50');
-            } else {
-                aiModelSelect.classList.remove('hidden');
-                aiModelManual.classList.add('hidden');
-                document.getElementById('btn-fetch-models').disabled = false;
-                document.getElementById('btn-fetch-models').classList.remove('opacity-50');
-            }
+            const provider = aiProvider.value;
+            
+            aiModelSelect.innerHTML = '';
+            
+            const models = MASTER_MODELS[provider] || [];
+            models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m;
+                opt.textContent = m;
+                aiModelSelect.appendChild(opt);
+            });
+            
+            const manualOpt = document.createElement('option');
+            manualOpt.value = '__MANUAL__';
+            manualOpt.textContent = '手動入力する...';
+            aiModelSelect.appendChild(manualOpt);
+            
+            document.getElementById('btn-fetch-models').disabled = false;
+            document.getElementById('btn-fetch-models').classList.remove('opacity-50');
+            
+            triggerModelInputVisibility();
         });
+    }
+
+    // モデルセレクトの変更イベント
+    if (aiModelSelect) {
+        aiModelSelect.addEventListener('change', () => {
+            triggerModelInputVisibility();
+        });
+    }
+
+    function triggerModelInputVisibility() {
+        if (aiModelSelect.value === '__MANUAL__' || aiModelSelect.options.length <= 1) {
+            aiModelManual.classList.remove('hidden');
+        } else {
+            aiModelManual.classList.add('hidden');
+        }
     }
 
     // モデルリスト取得
@@ -3418,12 +3610,25 @@ function setupMiscEvents() {
                         opt.textContent = m;
                         aiModelSelect.appendChild(opt);
                     });
+                    
+                    const manualOpt = document.createElement('option');
+                    manualOpt.value = '__MANUAL__';
+                    manualOpt.textContent = '手動入力する...';
+                    aiModelSelect.appendChild(manualOpt);
+                    
                     // もし設定済みのモデルがあれば選択を復元
                     const savedModel = JSON.parse(localStorage.getItem('ai_settings') || '{}').model;
                     if (savedModel && Array.from(aiModelSelect.options).some(o => o.value === savedModel)) {
                         aiModelSelect.value = savedModel;
+                    } else {
+                        aiModelSelect.value = aiModelSelect.options[0] ? aiModelSelect.options[0].value : '__MANUAL__';
                     }
-                    alert('モデルリストを更新しました！');
+                    triggerModelInputVisibility();
+                    
+                    // バックエンドでCSVが自動更新された可能性があるので最新の価格マスタを再読み込み
+                    await fetchLlmPricing();
+                    
+                    alert('モデルリストを更新しました！\n※未知のモデルが見つかった場合、CSVマスタ(data/common/m_llm_pricing.csv)に単価0として自動追記されました。');
                 } else {
                     alert('エラー: ' + data.message);
                 }
@@ -3447,14 +3652,15 @@ function setupMiscEvents() {
     if (btnSaveAiSettings) {
         btnSaveAiSettings.addEventListener('click', () => {
             const provider = aiProvider.value;
-            const model = provider === 'claude' ? aiModelManual.value : aiModelSelect.value;
+            const model = aiModelSelect.value === '__MANUAL__' ? aiModelManual.value.trim() : aiModelSelect.value;
             const settings = {
                 provider: provider,
-                apiKey: aiApiKey.value,
+                apiKey: aiApiKey.value.trim(),
                 model: model,
                 temperature: parseFloat(aiTemperature.value),
                 systemPrompt: aiSystemPrompt.value,
-                maxRetries: parseInt(document.getElementById('ai-max-retries').value || 3)
+                maxRetries: parseInt(document.getElementById('ai-max-retries').value || 3),
+                usdJpyRate: parseFloat(document.getElementById('ai-usd-jpy-rate').value || getUsdJpyRate())
             };
             localStorage.setItem('ai_settings', JSON.stringify(settings));
             aiSettingsDialog.classList.add('hidden');
