@@ -10,28 +10,31 @@ Vanilla JS + Tailwind CSS で構築された、超軽量かつ高速な完全自
 
 - **🔗 ドラッグ結線と連動押し出し (ドミノシフト)**: タスクのコネクタからドラッグ＆ドロップするだけで、直感的にベジェ曲線の美しい依存関係（結線）を作成できます。先行タスクのスケジュールが遅れて後続タスクに食い込んだ場合、後続タスクとその先のタスクまで再帰的に自動シフトします。
 <div align="center">
-  <img width="512" alt="Readme_001" src="https://github.com/user-attachments/assets/2f3fd3d3-6256-4e02-b0ad-9ae05b28cdb2" />
+  <img width="273" height="197" alt="image" src="https://github.com/user-attachments/assets/ebe4387e-f289-4ea7-a361-d1c276df197a" />
 </div>
-
 
 - **🟦 複数矩形選択 (範囲選択)**: ShiftキーまたはCtrlキーを押しながらドラッグすることで範囲選択が可能。複数のタスクを一瞬で一括選択し、島ごとにまとめて一気に移動・調整することが可能です。
 <div align="center">
-  <img width="512" alt="Readme_002" src="https://github.com/user-attachments/assets/784c0ab4-808e-46e1-9dcf-66088df62a0f" />
-</div> 
+<img height="128" alt="image" src="https://github.com/user-attachments/assets/d5887bb0-eceb-47c9-9730-216a3a025a01" />
+</div>
 
 - **🤖 AIアシスタント機能 & コスト自動試算**: 各種LLM（ChatGPT, Claude, Gemini等）と連携できるチャットビューを搭載。各メッセージごとの消費トークン数およびリアルタイムでの消費コスト（ドル・日本円換算）の目安自動試算表示機能を完備。
 <div align="center">
-  <img height="256" alt="Readme_003" src="https://github.com/user-attachments/assets/bdfcc8d4-759f-4482-a643-7f0b67c15e88" />
-  <img height="256" alt="Readme_004" src="https://github.com/user-attachments/assets/9de015ef-b528-442f-adf4-365b8cbb3862" />
+  <img height="256" alt="image" src="https://github.com/user-attachments/assets/b92bbfa5-7b40-4721-897a-cada917004b0" />
+  <img height="256" alt="image" src="https://github.com/user-attachments/assets/085e0816-5137-4c87-bb8c-6c40e95b7e1f" />
+  <img height="256" alt="image" src="https://github.com/user-attachments/assets/74455dc8-8bf1-4be4-90f2-f611d7d1c04f" />
+
 </div> 
 
 - **⚡ イナズマ線 (Progress Line) と Today線**: 本日日付（オレンジ色のToday線）を基準に、進捗の遅延・順調を視覚化（遅延は赤、順調は青）。一目でプロジェクトの健康状態を把握可能です。
 <div align="center">
-  <img width="512" alt="Readme_005" src="https://github.com/user-attachments/assets/2239825d-dde7-46da-847a-72513657041c" />
+  <img height="256" alt="image" src="https://github.com/user-attachments/assets/f1b60827-1bc3-43aa-8399-d17f9d1b16b5" />
 </div> 
 
-- **🛑 左制限 (制約制御)**: 後続タスクを過去へ移動させようとする際、先行タスクの終了日より前には配置できないようにUI上で自動クランプします。
 - **💾 CSV / マスターデータ連携**: マスターデータ（担当者、ステータス、キャラクター、バージョン等）をUIから直感的に管理でき、データはCSVとして保存・出力されます。
+<div align="center">
+  <img height="256" alt="image" src="https://github.com/user-attachments/assets/0c499259-9e0b-4331-84ee-92a6721fc447" />
+</div> 
 
 ---
 
