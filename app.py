@@ -616,16 +616,10 @@ if __name__ == '__main__':
                     # 5秒以上ハートビートファイルが更新されていなければ終了
                     if time.time() - val > 5:
                         print("Browser closed. Exiting server...")
-                        # CMDウィンドウごと強制終了する
-                        if os.name == 'nt':
-                            # 親プロセスのCMDを終了させる
-                            os.system('taskkill /F /IM cmd.exe /T >nul 2>&1')
                         os._exit(0)
                 else:
                     # ファイルが消された場合も終了
                     print("Heartbeat file missing. Exiting server...")
-                    if os.name == 'nt':
-                        os.system('taskkill /F /IM cmd.exe /T >nul 2>&1')
                     os._exit(0)
             except Exception as e:
                 # 読み込み中の一時的な競合等はスキップ
@@ -633,7 +627,10 @@ if __name__ == '__main__':
 
     if not os.environ.get('WERKZEUG_RUN_MAIN'):
         threading.Thread(target=open_browser, daemon=True).start()
-        threading.Thread(target=check_heartbeat, daemon=True).start()
+    
+    # 親・子プロセスを問わずすべてのプロセスでハートビート監視を起動
+    # これにより、ブラウザが閉じられた際に確実に自滅終了（exit）できるようになります
+    threading.Thread(target=check_heartbeat, daemon=True).start()
 
     if getattr(sys, 'frozen', False):
         app.run(debug=False, port=PORT)

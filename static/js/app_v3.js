@@ -159,6 +159,17 @@ const els = {
     toggleProgressLine: document.getElementById('toggle-progress-line')
 };
 
+const getElementOffset = (el) => {
+    let top = 0, left = 0;
+    let cur = el;
+    while (cur) {
+        top += cur.offsetTop || 0;
+        left += cur.offsetLeft || 0;
+        cur = cur.offsetParent;
+    }
+    return { top, left };
+};
+
 let currentTaskContextId = null;
 let selectedTaskIds = new Set();
 let lastMouseTime = null;
@@ -662,7 +673,7 @@ function dateToX(dateStrOrMoment) {
     return m.diff(ganttConfig.startDate, 'days') * ganttConfig.dayWidth;
 }
 function xToDate(x) {
-    const days = Math.floor(x / ganttConfig.dayWidth);
+    const days = Math.round(x / ganttConfig.dayWidth);
     return ganttConfig.startDate.clone().add(days, 'days');
 }
 
@@ -753,19 +764,21 @@ function buildGroupsList() {
     const activeChars = new Set();
     
     currentFilteredTasks.forEach(t => {
-        if (t.release_id) activeReleases.add(t.release_id);
-        if (t.release_id && t.char_id) activeChars.add(`${t.release_id}_${t.char_id}`);
+        if (t.release_id) activeReleases.add(String(t.release_id));
+        if (t.release_id && t.char_id) activeChars.add(String(`${t.release_id}_${t.char_id}`));
     });
 
     masters.release.forEach(rel => {
         const relId = rel.release_id;
-        if (!activeReleases.has(relId)) return;
+        if (!activeReleases.has(String(relId))) return;
 
         ganttConfig.groups.push({
             id: relId, type: 'release', name: rel.release_name, level: 0, raw: rel
         });
         
-        if (ganttConfig.collapsedGroups.has(relId)) return;
+        const isRelCollapsed = Array.from(ganttConfig.collapsedGroups).some(id => String(id).trim() === String(relId).trim());
+        console.log("Checking release collapse. relId:", String(relId), "isCollapsed:", isRelCollapsed);
+        if (isRelCollapsed) return;
 
         // タスクの配列順（登場順）でキャラクターの表示順を決定する
         const charsInThisRelease = [];
@@ -785,7 +798,9 @@ function buildGroupsList() {
                 id: charId, type: 'character', name: `${char.char_name} (${char.costume_name})`, parentId: relId, level: 1, raw: char
             });
             
-            if (ganttConfig.collapsedGroups.has(charId)) return;
+            const isCharCollapsed = Array.from(ganttConfig.collapsedGroups).some(id => String(id).trim() === String(charId).trim());
+            console.log("Checking character collapse. charId:", String(charId), "isCollapsed:", isCharCollapsed);
+            if (isCharCollapsed) return;
             
             // 対象キャラクターのタスクを抽出してテトリススタックをシミュレーションし、必要な行数（Lane数）を計算する
             const charTasks = currentFilteredTasks.filter(t => t.release_id === relId && t.char_id === char.char_id);
@@ -835,8 +850,9 @@ function buildGroupsList() {
                 }
             });
             
-            // 少なくとも1行は表示する。
-            const requiredLanes = Math.max(1, maxLaneNeeded);
+            // 少なくとも1行は表示する。さらに、常に次の行（空行）にタスクを移動・コピペできるように、
+            // 「現在の最大レーン数 + 1」の予備レーンを常に1行追加して用意しておく
+            const requiredLanes = Math.max(1, maxLaneNeeded) + 1;
             
             // mapping情報をキャラクターグループのrawに持たせておく（renderTasksで使うため）
             char.laneMapping = laneMapping;
@@ -1012,10 +1028,14 @@ function renderRows() {
 }
 
 function toggleGroup(id) {
-    if (ganttConfig.collapsedGroups.has(id)) {
-        ganttConfig.collapsedGroups.delete(id);
+    const idStr = String(id);
+    console.log("toggleGroup called for ID:", idStr);
+    if (ganttConfig.collapsedGroups.has(idStr)) {
+        ganttConfig.collapsedGroups.delete(idStr);
+        console.log("Removed from collapsedGroups. Current Set:", Array.from(ganttConfig.collapsedGroups));
     } else {
-        ganttConfig.collapsedGroups.add(id);
+        ganttConfig.collapsedGroups.add(idStr);
+        console.log("Added to collapsedGroups. Current Set:", Array.from(ganttConfig.collapsedGroups));
     }
     renderGantt();
 }
@@ -1043,7 +1063,9 @@ function renderTasks() {
         }
         const parentId = `${t.release_id}_${t.char_id}_LANE${mappedLane}`;
         
-        if (ganttConfig.collapsedGroups.has(t.release_id) || ganttConfig.collapsedGroups.has(`${t.release_id}_${t.char_id}`)) return;
+        const isRelCollapsed = Array.from(ganttConfig.collapsedGroups).some(id => String(id).trim() === String(t.release_id).trim());
+        const isCharCollapsed = Array.from(ganttConfig.collapsedGroups).some(id => String(id).trim() === String(`${t.release_id}_${t.char_id}`).trim());
+        if (isRelCollapsed || isCharCollapsed) return;
         
         const y = groupY[parentId];
         if (y === undefined) return;
@@ -1125,6 +1147,13 @@ function renderTasks() {
                     return;
                 }
             }
+        } else if (g.type === 'character') {
+            // 子グループ(キャラクター)も親リリースと同様にアート締め(art_deadline)に終了日を合わせる
+            const rel = getMasterItem('release', 'release_id', g.parentId);
+            if (rel && rel.art_deadline) {
+                maxEnd = moment(rel.art_deadline).add(1, 'days').startOf('day').valueOf();
+            }
+            if (minStart === Infinity || maxEnd === -Infinity) return;
         } else {
             if (minStart === Infinity || maxEnd === -Infinity) return;
         }
@@ -1137,11 +1166,11 @@ function renderTasks() {
         const y = groupY[g.id];
         
         const taskTop = y + (ganttConfig.rowHeight - taskHeight) / 2;
-        const isCollapsed = ganttConfig.collapsedGroups.has(g.id);
+        const isCollapsed = Array.from(ganttConfig.collapsedGroups).some(id => String(id).trim() === String(g.id).trim());
         const icon = isCollapsed ? '▶' : '▼';
         
         let barClass = '';
-        if (g.type === 'release') barClass = 'bg-gray-700 text-white font-bold';
+        if (g.type === 'release') barClass = 'bg-gray-700 text-white font-bold gantt-group-bar-release';
         else if (g.type === 'character') barClass = 'bg-gray-400 text-black font-bold gantt-group-bar-character';
 
         html += `
@@ -1311,6 +1340,11 @@ function drawDependencyPath(svg, p1, p2, fromId, toId, isPreview = false) {
             e.preventDefault();
             e.stopPropagation();
             showDependencyLineContextMenu(e, fromId, toId);
+        });
+
+        path.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectDependencyLine(fromId, toId, path);
         });
     }
     
@@ -1733,6 +1767,8 @@ function setupMouseTracking() {
         const taskRaw = allTasksRaw.find(t => t.task_id === taskId);
         if (!taskRaw) return;
         
+        currentTaskContextId = taskId; // 左クリック選択時にも同期する
+
         // 複数選択の処理
         if (e.ctrlKey || e.metaKey) {
             if (selectedTaskIds.has(taskId)) {
@@ -2275,6 +2311,8 @@ function openEditor(data, type = 'task') {
         document.getElementById('edit-character').value = raw.char_id;
         document.getElementById('edit-section').value = raw.section_id;
         
+        syncCharacterDropdowns(raw.char_id); // エディタを開いた瞬間にキャラと衣装のドロップダウンを同期
+        
         updateEventDisplay(raw.release_id);
         
         document.getElementById('edit-section').dispatchEvent(new Event('change'));
@@ -2284,6 +2322,7 @@ function openEditor(data, type = 'task') {
         document.getElementById('edit-start').value = raw.start_date;
         document.getElementById('edit-end').value = raw.end_date;
         document.getElementById('edit-progress').value = raw.progress;
+        document.getElementById('edit-status').value = raw.status_id || '';
 
         document.getElementById('btn-delete-task').classList.remove('hidden');
         document.getElementById('btn-apply-task').classList.remove('hidden');
@@ -2350,6 +2389,7 @@ function openEditorNew(groupId, dateObj) {
     document.getElementById('edit-start').value = dateStr;
     document.getElementById('edit-end').value = dateStr;
     document.getElementById('edit-progress').value = 0;
+    document.getElementById('edit-status').value = '';
     
     document.getElementById('edit-release').value = '';
     document.getElementById('edit-character').value = '';
@@ -2404,6 +2444,7 @@ function populateDropdowns() {
     };
     renderOptions(masters.release, 'release_id', 'release_name', 'edit-release');
     renderOptions(masters.section, 'section_id', 'section_name', 'edit-section');
+    renderOptions(masters.status, 'status_id', 'status_name', 'edit-status');
 
     const nameSel = document.getElementById('edit-character-name');
     if (nameSel && masters.character) {
@@ -2465,7 +2506,11 @@ function setupMiscEvents() {
     document.getElementById('edit-task-name').addEventListener('change', (e) => {
         const selected = e.target.options[e.target.selectedIndex];
         const days = selected.getAttribute('data-days');
-        if (days) {
+        const taskId = document.getElementById('edit-task-id').value; // 既存タスクかどうか判定用
+        
+        // 新規作成時（taskIdが空）のみ基本工数で終了日を上書きする。
+        // ガント上で既に期間を調整した既存タスクを編集する場合は上書きしない。
+        if (days && !taskId) {
             const start = document.getElementById('edit-start').value;
             if (start) {
                 const endDate = new Date(start);
@@ -4194,10 +4239,9 @@ function setupMiscEvents() {
         
         lastMouseTime = xToDate(mouseX).toDate();
         const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
-        let hoveredGroup = null;
+        
         if (rowIndex >= 0 && rowIndex < ganttConfig.groups.length) {
             lastMouseGroup = ganttConfig.groups[rowIndex].id;
-            hoveredGroup = ganttConfig.groups[rowIndex];
         } else {
             lastMouseGroup = null;
         }
@@ -4222,6 +4266,32 @@ function setupMiscEvents() {
                 if (!copiedTaskRaw) {
                     document.getElementById('ctx-paste').classList.add('opacity-50', 'pointer-events-none');
                 }
+            }
+
+            // ステータス変更サブメニューの動的生成
+            const statusSubMenu = document.getElementById('ctx-status-submenu');
+            if (statusSubMenu && masters.status) {
+                statusSubMenu.innerHTML = masters.status.map(s => `
+                    <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer flex items-center context-status" data-status-id="${s.status_id}">
+                        <span class="inline-block w-3 h-3 rounded-full mr-2 flex-shrink-0" style="background-color: ${s.color}; border: 1px solid #ccc;"></span>
+                        <span>${s.status_name}</span>
+                    </div>
+                `).join('');
+                
+                // イベントリスナーの登録
+                document.querySelectorAll('.context-status').forEach(el => {
+                    el.addEventListener('click', (ev) => {
+                        if (currentTaskContextId) {
+                            saveHistory();
+                            const statId = ev.currentTarget.getAttribute('data-status-id');
+                            const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
+                            if (t) t.status_id = statId;
+                            markUnsaved();
+                            renderGantt();
+                            document.getElementById('context-menu').classList.add('hidden');
+                        }
+                    });
+                });
             }
 
             contextMenu.style.left = e.clientX + 'px';
@@ -4256,6 +4326,9 @@ function setupMiscEvents() {
             const contextMenu = document.getElementById('context-menu');
             if (contextMenu) contextMenu.classList.add('hidden');
         }
+        if (!e.target.closest('.gantt-dependency-line')) {
+            deselectDependencyLine();
+        }
     });
 
     document.addEventListener('keydown', (e) => {
@@ -4272,17 +4345,37 @@ function setupMiscEvents() {
         } else if (e.ctrlKey && e.code === 'KeyY') {
             e.preventDefault();
             if (typeof performRedo === 'function') performRedo();
-        } else if (e.ctrlKey && e.key === 'c') {
+        } else if (e.ctrlKey && e.code === 'KeyC') {
             if (currentTaskContextId) {
                 const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
-                if (t) copiedTaskRaw = JSON.parse(JSON.stringify(t));
+                if (t) {
+                    copiedTaskRaw = JSON.parse(JSON.stringify(t));
+                    console.log("Task copied via Ctrl+C:", copiedTaskRaw);
+                } else {
+                    console.log("Ctrl+C failed: Task not found with ID", currentTaskContextId);
+                }
+            } else {
+                console.log("Ctrl+C failed: No task selected (currentTaskContextId is null)");
             }
-        } else if (e.ctrlKey && e.key === 'v') {
+        } else if (e.ctrlKey && e.code === 'KeyV') {
+            console.log("Ctrl+V pressed. copiedTaskRaw:", copiedTaskRaw, "currentHoverGroup:", currentHoverGroup, "currentHoverDate:", currentHoverDate);
             if (copiedTaskRaw && currentHoverGroup && currentHoverDate) {
                 pasteTask(currentHoverGroup, currentHoverDate);
+            } else {
+                if (!copiedTaskRaw) {
+                    console.warn("Ctrl+V failed: No copied task data.");
+                } else if (!currentHoverGroup) {
+                    console.warn("Ctrl+V failed: Mouse is not hovering on a valid gantt row.");
+                }
             }
         } else if (e.key === 'Delete') {
-            if (currentTaskContextId) {
+            if (selectedDependency) {
+                if (confirm('選択した連結線（依存関係）を削除しますか？')) {
+                    saveHistory();
+                    removeDependency(selectedDependency.fromId, selectedDependency.toId);
+                    deselectDependencyLine();
+                }
+            } else if (currentTaskContextId) {
                 if (confirm('選択中のタスクを削除しますか？')) {
                     saveHistory();
                     allTasksRaw = allTasksRaw.filter(t => t.task_id !== currentTaskContextId);
@@ -4310,14 +4403,26 @@ function setupMiscEvents() {
     document.getElementById('ctx-copy').addEventListener('click', () => {
         if (currentTaskContextId) {
             const t = allTasksRaw.find(x => x.task_id === currentTaskContextId);
-            if (t) copiedTaskRaw = JSON.parse(JSON.stringify(t));
+            if (t) {
+                copiedTaskRaw = JSON.parse(JSON.stringify(t));
+                console.log("Task copied via Menu:", copiedTaskRaw);
+            } else {
+                console.warn("Menu Copy failed: Task not found with ID", currentTaskContextId);
+            }
         }
         document.getElementById('context-menu').classList.add('hidden');
     });
 
     document.getElementById('ctx-paste').addEventListener('click', () => {
+        console.log("Menu Paste clicked. copiedTaskRaw:", copiedTaskRaw, "lastMouseGroup:", lastMouseGroup, "lastMouseTime:", lastMouseTime);
         if (copiedTaskRaw && lastMouseGroup && lastMouseTime) {
             pasteTask(lastMouseGroup, lastMouseTime);
+        } else {
+            if (!copiedTaskRaw) {
+                console.warn("Menu Paste failed: No copied task data.");
+            } else if (!lastMouseGroup) {
+                console.warn("Menu Paste failed: lastMouseGroup is null.");
+            }
         }
         document.getElementById('context-menu').classList.add('hidden');
     });
@@ -4336,16 +4441,63 @@ function setupMiscEvents() {
 }
 
 function pasteTask(targetGroup, targetTime) {
-    if (!copiedTaskRaw) return;
+    console.log("pasteTask execution started. targetGroup:", targetGroup, "targetTime:", targetTime);
+    if (!copiedTaskRaw) {
+        console.error("pasteTask failed: No task was copied (copiedTaskRaw is null)");
+        return;
+    }
     saveHistory();
     const newRaw = JSON.parse(JSON.stringify(copiedTaskRaw));
     newRaw.task_id = 'TSK_' + Date.now();
     
-    const parts = targetGroup.split('_');
-    if (parts.length >= 4) {
-        newRaw.release_id = parts[0] + '_' + parts[1];
-        newRaw.char_id = parts[2] + '_' + parts[3];
-        newRaw.lane = parts[4] ? parts[4].replace('LANE', '') : '1';
+    // コピーであることを視覚的にわかりやすくするため名前に「(コピー)」を付与
+    if (newRaw.task_name && !newRaw.task_name.endsWith(" (コピー)")) {
+        newRaw.task_name += " (コピー)";
+    }
+    
+    // コピーされた新タスクで先行関係(dependencies)を引き継ぐと描画が崩れたり
+    // 先行タスクの日付変更に勝手に追従して動いてしまいバグのように見えるため、ペースト時は空にするのが安全
+    newRaw.dependencies = '';
+
+    // targetGroup (laneId や charId などの行ID) から、ganttConfig.groups を走査して、
+    // 正確な release_id, char_id, lane を特定する
+    const group = ganttConfig.groups.find(g => String(g.id) === String(targetGroup));
+    console.log("Found matching group for paste:", group);
+    if (group) {
+        if (group.type === 'lane') {
+            const charGroup = ganttConfig.groups.find(g => String(g.id) === String(group.parentId));
+            if (charGroup) {
+                newRaw.release_id = String(charGroup.parentId);
+                newRaw.char_id = charGroup.raw ? String(charGroup.raw.char_id) : String(copiedTaskRaw.char_id);
+            } else {
+                newRaw.char_id = String(copiedTaskRaw.char_id);
+            }
+            // IDの末尾からLANE番号を抽出する (例: "R_001_C_001_LANE2" の末尾の数字)
+            const laneMatch = group.id.match(/_LANE(\d+)$/);
+            newRaw.lane = laneMatch ? String(laneMatch[1]) : '1';
+        } else if (group.type === 'character') {
+            newRaw.release_id = String(group.parentId);
+            newRaw.char_id = group.raw ? String(group.raw.char_id) : String(copiedTaskRaw.char_id);
+            newRaw.lane = '1';
+        } else if (group.type === 'release') {
+            newRaw.release_id = String(group.id);
+            newRaw.char_id = String(copiedTaskRaw.char_id); // 幽霊タスク化（表示消滅）を防ぐためにコピー元のキャラクターを維持
+            newRaw.lane = '1';
+        }
+    } else {
+        // フォールバック
+        console.warn("Matching group not found for targetGroup:", targetGroup, ". Using fallback string split.");
+        const parts = targetGroup.split('_');
+        if (parts.length >= 4) {
+            newRaw.release_id = String(parts[0] + '_' + parts[1]);
+            newRaw.char_id = String(parts[2] + '_' + parts[3]);
+            newRaw.lane = parts[4] ? String(parts[4].replace('LANE', '')) : '1';
+        } else if (parts.length === 1) {
+            // 単なるリリースIDが渡された場合のスマートフォールバック
+            newRaw.release_id = String(targetGroup);
+            newRaw.char_id = String(copiedTaskRaw.char_id);
+            newRaw.lane = '1';
+        }
     }
     
     const oldStart = moment(copiedTaskRaw.start_date);
@@ -4356,6 +4508,7 @@ function pasteTask(targetGroup, targetTime) {
     newRaw.start_date = newStart.format('YYYY-MM-DD');
     newRaw.end_date = newStart.clone().add(durationDays, 'days').format('YYYY-MM-DD');
     
+    console.log("Pushing newly pasted task into allTasksRaw:", newRaw);
     allTasksRaw.push(newRaw);
     markUnsaved();
     renderGantt();
@@ -4427,6 +4580,22 @@ function isCircularDependency(sourceId, targetId, visited = new Set()) {
     }
     
     return false;
+}
+
+let selectedDependency = null;
+
+function selectDependencyLine(fromId, toId, element) {
+    deselectDependencyLine();
+    
+    selectedDependency = { fromId, toId, element };
+    element.classList.add('selected-line');
+}
+
+function deselectDependencyLine() {
+    if (selectedDependency) {
+        selectedDependency.element.classList.remove('selected-line');
+        selectedDependency = null;
+    }
 }
 
 let currentDependencyContext = null;

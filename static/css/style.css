@@ -288,3 +288,14 @@ body, html {
 .gantt-task-item.dependency-target-hover {
     box-shadow: 0 0 0 3px #10b981 !important; /* ドロップ先のハイライト：緑 */
 }
+
+/* タスクなどのマウスイベントを有効化 */
+.gantt-task-item, .gantt-group-bar-character, .gantt-group-bar-release, .gantt-deadline-marker, .gantt-dependency-connector {
+    pointer-events: auto !important;
+}
+
+/* 選択された連結線 */
+.gantt-dependency-line.selected-line {
+    stroke: #ef4444 !important;
+    stroke-width: 4px !important;
+}

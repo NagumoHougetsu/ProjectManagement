@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WBS Timeline Editor</title>
+    <title>南雲式WBSツール</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Moment.js -->
@@ -177,9 +177,9 @@
                         <!-- 行（レーン）の背景と区切り線 -->
                         <div id="gantt-rows" class="absolute top-0 left-0 w-full h-full pointer-events-none"></div>
                         <!-- タスクの配置コンテナ -->
-                        <div id="gantt-tasks" class="absolute top-0 left-0 w-full h-full z-10"></div>
+                        <div id="gantt-tasks" class="absolute top-0 left-0 w-full h-full z-10 pointer-events-none"></div>
                         <!-- 依存関係線の配置コンテナ -->
-                        <svg id="gantt-dependency-lines" class="absolute top-0 left-0 w-full h-full pointer-events-none" style="z-index: 15; overflow: visible;"></svg>
+                        <svg id="gantt-dependency-lines" class="absolute top-0 left-0 w-full h-full" style="z-index: 5; overflow: visible;"></svg>
                         <!-- イナズマ線の配置コンテナ -->
                         <div id="gantt-progress-line" class="absolute top-0 left-0 w-full h-full z-20 pointer-events-none"></div>
                         <!-- 今日の日付線の配置コンテナ -->
@@ -445,6 +445,15 @@
                     <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer context-progress" data-progress="50">50%</div>
                     <div class="px-4 py-2 hover:bg-blue-100 cursor-pointer context-progress" data-progress="75">75%</div>
                     <div class="px-4 py-2 hover:bg-green-100 cursor-pointer context-progress" data-progress="100">100% (完了)</div>
+                </div>
+            </div>
+
+            <div class="relative group menu-item ctx-item-task" id="ctx-status-change">
+                <div class="px-4 py-2 hover:bg-gray-100 cursor-pointer font-bold text-gray-700 flex justify-between items-center">
+                    <span>ステータス変更</span><span>▶</span>
+                </div>
+                <!-- サブメニュー（JSで動的生成） -->
+                <div id="ctx-status-submenu" class="absolute left-full top-0 hidden group-hover:block bg-white border shadow-lg rounded py-1 w-44 -ml-1 z-[30000]">
                 </div>
             </div>
             
