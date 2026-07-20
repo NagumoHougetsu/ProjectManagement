@@ -1,3 +1,0 @@
-task_id,release_id,char_id,section_id,task_name,member_id,start_date,end_date,progress,status_id
-TSK_001,R_001,C_001,S_001,ラフ制作,M_001,2026-07-01,2026-07-05,100,ST_005
-TSK_002,R_001,C_001,S_001,線画制作,M_001,2026-07-06,2026-07-08,50,ST_002

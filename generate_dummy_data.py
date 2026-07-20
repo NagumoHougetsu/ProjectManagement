@@ -37,9 +37,24 @@ color_combinations = [
 for s in sections:
     for i in range(2): 
         colors = random.choice(color_combinations)
+        
+        # 3文字ルール display_name 構築
+        sec_name = s['section_name']
+        if sec_name == "3D_Char":
+            disp_name = f"3D{i+1}"
+        elif sec_name == "Motion":
+            disp_name = f"Mo{i+1}"
+        elif sec_name == "Effect":
+            disp_name = f"Ef{i+1}"
+        elif sec_name == "2D":
+            disp_name = f"2D{i+1}"
+        else:
+            disp_name = f"BG{i+1}"
+
         members.append({
             "member_id": f"M_{member_id_count:03d}",
             "member_name": f"担当_{s['section_name']}_{i+1}",
+            "display_name": disp_name,
             "section_id": s['section_id'],
             "bg_color": colors[0],
             "text_color": colors[1]
@@ -210,7 +225,7 @@ def save_csv(path, data, fieldnames):
 save_csv(os.path.join(BASE_DIR, 'm_release.csv'), releases, ["release_id", "release_name", "art_deadline", "event_name"])
 save_csv(os.path.join(BASE_DIR, 'm_character.csv'), characters, ["char_id", "char_name", "costume_name", "category", "usage", "event_id"])
 save_csv(os.path.join(BASE_DIR, 'm_section.csv'), sections, ["section_id", "section_name", "color"])
-save_csv(os.path.join(BASE_DIR, 'm_member.csv'), members, ["member_id", "member_name", "section_id", "bg_color", "text_color"])
+save_csv(os.path.join(BASE_DIR, 'm_member.csv'), members, ["member_id", "member_name", "display_name", "section_id", "bg_color", "text_color"])
 save_csv(os.path.join(BASE_DIR, 'm_status.csv'), statuses, ["status_id", "status_name", "color"])
 
 for s_id, t_data in tasks_out.items():

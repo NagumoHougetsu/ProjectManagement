@@ -1,3 +1,0 @@
-task_id,release_id,char_id,section_id,task_name,member_id,start_date,end_date,progress,status_id
-TSK_003,R_001,C_001,S_002,骨組み作成,M_002,2026-07-09,2026-07-11,0,ST_001
-TSK_004,R_001,C_002,S_002,アニメーション付け,M_002,2026-07-15,2026-07-21,0,ST_001

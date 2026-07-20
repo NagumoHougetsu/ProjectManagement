@@ -46,12 +46,12 @@ def get_project_dir(project_name):
 def read_csv_as_dicts(filepath):
     if not os.path.exists(filepath):
         return []
-    with open(filepath, 'r', encoding='utf-8') as f:
+    with open(filepath, 'r', encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
         return list(reader)
 
 def write_dicts_to_csv(filepath, fieldnames, data):
-    with open(filepath, 'w', encoding='utf-8', newline='') as f:
+    with open(filepath, 'w', encoding='utf-8-sig', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(data)
@@ -277,6 +277,7 @@ def ai_chat_proxy():
     messages = data.get('messages', [])
     system_prompt = data.get('systemPrompt', '')
     temperature = data.get('temperature', 0.7)
+    images = data.get('images', []) # list of base64 strings like 'data:image/png;base64,...'
 
     if not api_key or not model:
         return jsonify({"status": "error", "message": "APIキーとモデルが正しく設定されていません。"}), 400
@@ -285,13 +286,61 @@ def ai_chat_proxy():
         reply_text = ""
         total_tokens = 0
 
+        # 画像データを各プロバイダのフォーマットに合わせて最後のユーザーメッセージに追加する
+        # (システムプロンプトと一緒に渡すことはできない場合が多いのでユーザーメッセージに入れる)
+        def append_images_to_last_user_message_openai(msgs, imgs):
+            if not imgs: return msgs
+            last_user_idx = -1
+            for i in range(len(msgs)-1, -1, -1):
+                if msgs[i]['role'] == 'user':
+                    last_user_idx = i
+                    break
+            
+            if last_user_idx != -1:
+                original_content = msgs[last_user_idx]['content']
+                new_content = [{"type": "text", "text": original_content}]
+                for img in imgs:
+                    new_content.append({"type": "image_url", "image_url": {"url": img}})
+                msgs[last_user_idx]['content'] = new_content
+            return msgs
+
+        def append_images_to_last_user_message_claude(msgs, imgs):
+            if not imgs: return msgs
+            last_user_idx = -1
+            for i in range(len(msgs)-1, -1, -1):
+                if msgs[i]['role'] == 'user':
+                    last_user_idx = i
+                    break
+            
+            if last_user_idx != -1:
+                original_content = msgs[last_user_idx]['content']
+                new_content = [{"type": "text", "text": original_content}]
+                for img in imgs:
+                    if ',' in img:
+                        header, b64data = img.split(',', 1)
+                        media_type = header.split(':')[1].split(';')[0]
+                        new_content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": b64data
+                            }
+                        })
+                msgs[last_user_idx]['content'] = new_content
+            return msgs
+
         if provider == 'openai':
             # OpenAI API Format
             api_url = "https://api.openai.com/v1/chat/completions"
             payload_messages = []
             if system_prompt:
                 payload_messages.append({"role": "system", "content": system_prompt})
-            payload_messages.extend(messages)
+            
+            # クローンして画像を追加
+            cloned_messages = [dict(m) for m in messages]
+            cloned_messages = append_images_to_last_user_message_openai(cloned_messages, images)
+            payload_messages.extend(cloned_messages)
             
             payload = {
                 "model": model,
@@ -310,12 +359,16 @@ def ai_chat_proxy():
         elif provider == 'claude':
             # Anthropic API Format (Messages API)
             api_url = "https://api.anthropic.com/v1/messages"
+            
+            cloned_messages = [dict(m) for m in messages]
+            cloned_messages = append_images_to_last_user_message_claude(cloned_messages, images)
+            
             payload = {
                 "model": model,
                 "max_tokens": 4096,
                 "temperature": temperature,
                 "system": system_prompt,
-                "messages": messages
+                "messages": cloned_messages
             }
             req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'))
             req.add_header("x-api-key", api_key)
@@ -331,10 +384,37 @@ def ai_chat_proxy():
             # Gemini API Format
             api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
             gemini_messages = []
-            for msg in messages:
+            
+            for idx, msg in enumerate(messages):
+                parts = [{"text": msg['content']}]
+                
+                # 最後のユーザーメッセージに画像を追加
+                is_last_user = False
+                if msg['role'] == 'user':
+                    # 後ろにユーザーメッセージがないか確認
+                    is_last = True
+                    for j in range(idx + 1, len(messages)):
+                        if messages[j]['role'] == 'user':
+                            is_last = False
+                            break
+                    if is_last:
+                        is_last_user = True
+                
+                if is_last_user and images:
+                    for img in images:
+                        if ',' in img:
+                            header, b64data = img.split(',', 1)
+                            mime_type = header.split(':')[1].split(';')[0]
+                            parts.append({
+                                "inline_data": {
+                                    "mime_type": mime_type,
+                                    "data": b64data
+                                }
+                            })
+
                 gemini_messages.append({
                     "role": "user" if msg['role'] == "user" else "model",
-                    "parts": [{"text": msg['content']}]
+                    "parts": parts
                 })
                 
             payload = {

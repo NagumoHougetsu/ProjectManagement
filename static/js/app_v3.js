@@ -235,20 +235,127 @@ async function fetchMasters() {
             // 現在のチェック状態を保存（あれば）
             const currentSelected = window.getSelectedMembers ? window.getSelectedMembers() : [];
             
-            filterMemberList.innerHTML = masters.member.map(m => `
-                <label class="flex items-center space-x-2 px-2 py-1 hover:bg-gray-100 rounded cursor-pointer member-filter-item">
-                    <input type="checkbox" class="member-filter-cb" value="${m.member_id}" data-name="${m.member_name}" ${currentSelected.includes(m.member_id) ? 'checked' : ''}>
-                    <span>${m.member_name}${m.display_name ? ' (' + m.display_name + ')' : ''}</span>
-                </label>
-            `).join('');
+            let html = '';
+            
+            // セクションごとにグループ化
+            if (masters.section) {
+                masters.section.forEach(s => {
+                    const secMembers = masters.member.filter(m => m.section_id === s.section_id);
+                    if (secMembers.length === 0) return;
+                    
+                    const childrenHTML = secMembers.map(m => `
+                        <label class="flex items-center space-x-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer member-filter-item" data-section="${s.section_id}">
+                            <input type="checkbox" class="member-filter-cb" value="${m.member_id}" data-name="${m.member_name}" data-section="${s.section_id}" ${currentSelected.includes(m.member_id) ? 'checked' : ''}>
+                            <span class="text-xs">${m.member_name}${m.display_name ? ' (' + m.display_name + ')' : ''}</span>
+                        </label>
+                    `).join('');
+                    
+                    html += `
+                    <div class="member-filter-section-group mb-2 border-b border-gray-100 pb-2 last:border-0 last:pb-0" data-section="${s.section_id}">
+                        <label class="flex items-center space-x-2 px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer font-bold text-[11px] select-none mb-1">
+                            <input type="checkbox" class="section-filter-cb" value="${s.section_id}" data-name="${s.section_name}">
+                            <span>📁 ${s.section_name}</span>
+                        </label>
+                        <div class="pl-4 ml-1 space-y-1 member-filter-children-container">
+                            ${childrenHTML}
+                        </div>
+                    </div>
+                    `;
+                });
+                
+                // セクションに所属していないメンバー
+                const otherMembers = masters.member.filter(m => !m.section_id || !masters.section.some(s => s.section_id === m.section_id));
+                if (otherMembers.length > 0) {
+                    const childrenHTML = otherMembers.map(m => `
+                        <label class="flex items-center space-x-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer member-filter-item" data-section="others">
+                            <input type="checkbox" class="member-filter-cb" value="${m.member_id}" data-name="${m.member_name}" data-section="others" ${currentSelected.includes(m.member_id) ? 'checked' : ''}>
+                            <span class="text-xs">${m.member_name}${m.display_name ? ' (' + m.display_name + ')' : ''}</span>
+                        </label>
+                    `).join('');
+                    
+                    html += `
+                    <div class="member-filter-section-group mb-2 border-b border-gray-100 pb-2 last:border-0 last:pb-0" data-section="others">
+                        <label class="flex items-center space-x-2 px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded cursor-pointer font-bold text-[11px] select-none mb-1">
+                            <input type="checkbox" class="section-filter-cb" value="others" data-name="その他">
+                            <span>📁 その他</span>
+                        </label>
+                        <div class="pl-4 ml-1 space-y-1 member-filter-children-container">
+                            ${childrenHTML}
+                        </div>
+                    </div>
+                    `;
+                }
+            } else {
+                // セクションマスタがない場合は通常通り並べる
+                html = masters.member.map(m => `
+                    <label class="flex items-center space-x-2 px-2 py-1 hover:bg-gray-100 rounded cursor-pointer member-filter-item">
+                        <input type="checkbox" class="member-filter-cb" value="${m.member_id}" data-name="${m.member_name}" ${currentSelected.includes(m.member_id) ? 'checked' : ''}>
+                        <span>${m.member_name}${m.display_name ? ' (' + m.display_name + ')' : ''}</span>
+                    </label>
+                `).join('');
+            }
+            
+            filterMemberList.innerHTML = html;
 
-            // イベントリスナーの再設定
-            document.querySelectorAll('.member-filter-cb').forEach(cb => {
-                cb.addEventListener('change', () => {
+            // 親チェックボックス（セクション）の変更時連動
+            document.querySelectorAll('.section-filter-cb').forEach(secCb => {
+                secCb.addEventListener('change', (e) => {
+                    const secId = e.target.value;
+                    const isChecked = e.target.checked;
+                    
+                    // 配下の子メンバーに適用
+                    const childCbs = document.querySelectorAll(`.member-filter-cb[data-section="${secId}"]`);
+                    childCbs.forEach(childCb => {
+                        if (childCb.checked !== isChecked) {
+                            childCb.checked = isChecked;
+                        }
+                    });
+                    
                     updateMemberFilterText();
                     renderGantt();
                 });
             });
+
+            // 子メンバーのチェック状態から親の状態を更新する関数
+            function updateSectionCbState(secId) {
+                const secCb = document.querySelector(`.section-filter-cb[value="${secId}"]`);
+                if (!secCb) return;
+                
+                const childCbs = document.querySelectorAll(`.member-filter-cb[data-section="${secId}"]`);
+                if (childCbs.length === 0) return;
+                
+                const checkedCount = Array.from(childCbs).filter(cb => cb.checked).length;
+                
+                if (checkedCount === childCbs.length) {
+                    secCb.checked = true;
+                    secCb.indeterminate = false;
+                } else if (checkedCount === 0) {
+                    secCb.checked = false;
+                    secCb.indeterminate = false;
+                } else {
+                    secCb.checked = false;
+                    secCb.indeterminate = true; // 中間状態
+                }
+            }
+
+            // 子メンバーチェックボックスの変更時連動
+            document.querySelectorAll('.member-filter-cb').forEach(cb => {
+                cb.addEventListener('change', (e) => {
+                    const secId = e.target.getAttribute('data-section');
+                    updateSectionCbState(secId);
+                    updateMemberFilterText();
+                    renderGantt();
+                });
+            });
+
+            // 初期ロード時の親（セクション）のチェックボックス状態を同期
+            if (masters.section) {
+                const sectionsList = masters.section.map(s => s.section_id).concat(['others']);
+                sectionsList.forEach(secId => {
+                    updateSectionCbState(secId);
+                });
+            }
+
             updateMemberFilterText();
         }
     }
@@ -930,7 +1037,8 @@ function renderTasks() {
         const artDeadline = rel.art_deadline;
         if (!artDeadline) return;
 
-        const charTasks = currentFilteredTasks.filter(t => t.release_id === g.parentId && t.char_id === g.raw.char_id);
+        // マイルストーン（締め切り線）はフィルターに依存せず全て表示させるため、allTasksRaw を使用する
+        const charTasks = allTasksRaw.filter(t => t.release_id === g.parentId && t.char_id === g.raw.char_id);
         const activeSectionIds = new Set(charTasks.map(t => t.section_id));
 
         // 対象キャラクターグループの表示領域（Y座標と高さ）を計算
@@ -2329,6 +2437,7 @@ function setupMiscEvents() {
     let currentAiMode = 'assistant'; // 'assistant' または 'operator'
     let attachedFileContent = null;
     let attachedFileName = null;
+    let attachedImages = []; // ペーストされた画像データの配列 (Base64)
     let allTasksRawBackup = null; // スケジュール提案の一時プレビュー用バックアップ
 
     const aiSessionsView = document.getElementById('ai-sessions-view');
@@ -2482,6 +2591,15 @@ function setupMiscEvents() {
         const session = sessions.find(s => s.id === id);
         if (session) {
             aiPanelTitle.textContent = session.title || 'AIセッション';
+            const periodEl = document.getElementById('ai-panel-period');
+            if (periodEl) {
+                if (session.startDate && session.endDate) {
+                    periodEl.textContent = `対象期間: ${session.startDate} 〜 ${session.endDate}`;
+                    periodEl.classList.remove('hidden');
+                } else {
+                    periodEl.classList.add('hidden');
+                }
+            }
             renderAiChatMessages(session.messages || []);
         } else {
             renderAiChatMessages([]);
@@ -2587,7 +2705,15 @@ function setupMiscEvents() {
             let parsedTasks = null;
 
             if (isUser) {
-                messageHTML = `<div class="bg-blue-100 border-blue-200 border rounded-lg p-2 text-sm max-w-[90%] whitespace-pre-wrap">${escapeHTML(msg.content)}</div>`;
+                let imagesHTML = '';
+                if (msg.images && msg.images.length > 0) {
+                    imagesHTML = '<div class="flex flex-wrap gap-2 mt-2">';
+                    msg.images.forEach(img => {
+                        imagesHTML += `<img src="${img}" class="max-h-32 rounded border shadow-sm cursor-pointer hover:opacity-90" onclick="window.open('${img}', '_blank')">`;
+                    });
+                    imagesHTML += '</div>';
+                }
+                messageHTML = `<div class="bg-blue-100 border-blue-200 border rounded-lg p-2 text-sm max-w-[90%] whitespace-pre-wrap">${escapeHTML(msg.content)}${imagesHTML}</div>`;
             } else if (msg.role === 'process') {
                 const isActive = msg.status === 'active';
                 const icon = isActive 
@@ -2598,10 +2724,15 @@ function setupMiscEvents() {
                     : 'bg-gray-50 border-gray-200 border text-gray-500';
 
                 messageHTML = `
-<div class="${bgClass} rounded-lg p-2 text-xs max-w-[90%] flex items-center space-x-2 select-none shadow-sm">
-  ${icon}
-  <span class="font-mono font-semibold">${escapeHTML(msg.content)} (${escapeHTML(msg.time)}${msg.tokens || ''})</span>
-</div>`;
+<details class="${bgClass} rounded-lg p-2 text-xs max-w-[90%] select-none shadow-sm mb-1" ${isActive ? 'open' : ''}>
+  <summary class="flex items-center space-x-2 cursor-pointer outline-none">
+    ${icon}
+    <span class="font-mono font-semibold">${escapeHTML(msg.textDesc)} (${escapeHTML(msg.time)}${msg.tokens || ''})</span>
+  </summary>
+  <div class="mt-2 pl-6 text-gray-600 bg-white p-2 rounded border border-gray-100 font-mono text-[10px] whitespace-pre-wrap max-h-48 overflow-y-auto">
+    ${msg.details ? escapeHTML(msg.details) : '詳細データなし'}
+  </div>
+</details>`;
             } else if (isError) {
                 messageHTML = `
 <div class="bg-red-50 border-red-200 border rounded-lg p-3 text-sm max-w-[90%] text-red-700 flex items-start space-x-2 shadow-sm">
@@ -2635,22 +2766,9 @@ function setupMiscEvents() {
                     tokenFooter = `
 <div class="mt-2 border-t pt-1 text-[10px] text-gray-400 font-semibold flex justify-between items-center select-none">
   <span>🪙${tokenStr}${respTimeStr}${timeStr}</span>
-</div>
-<details class="bg-white border rounded p-2 mt-2 text-[10px] text-gray-600 cursor-pointer select-none">
-  <summary class="font-bold text-gray-500 outline-none hover:text-gray-700">⚙️ WBS処理プロセス・ログを表示 (クリックで展開)</summary>
-  <div class="font-mono mt-1 space-y-1 pl-2 border-l border-gray-300 text-left">
-    <div>• [1] 対象期間タスク＆マスターデータ抽出 (完了)</div>
-    <div>• [2] システムプロンプト＆コンテキスト結合 (完了)</div>
-    <div>• [3] AIサーバー接続・スケジュールパズル計算 (完了 / 所要時間: ${msg.responseTime || '?.?'}s)</div>
-    <div>• [4] 物理制約バリデーション（依存関係/デッドライン） (完了)</div>
-    <div>• [5] ガントチャートプレビュー用データ出力 (完了)</div>
-    <div class="text-[9px] text-gray-400 mt-1 border-t border-dashed pt-1">
-      - 取得ステータス: 成功 (BOM付きデータ互換検証済)<br>
-      - 送信コンテキスト: 6メッセージ上限スライス適用済
-    </div>
-  </div>
-</details>
-`;
+</div>`;
+
+
                 }
 
                 messageHTML = `<div class="bg-gray-100 border-gray-200 border rounded-lg p-3 text-sm max-w-[90%] ai-markdown-content">${parsedContent}${tokenFooter}</div>`;
@@ -2863,6 +2981,49 @@ function setupMiscEvents() {
             }
         });
 
+        // クリップボードからの画像ペースト対応
+        aiChatInput.addEventListener('paste', (e) => {
+            const items = e.clipboardData.items;
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    const blob = items[i].getAsFile();
+                    const reader = new FileReader();
+                    reader.onload = function(evt) {
+                        const base64 = evt.target.result;
+                        attachedImages.push(base64);
+                        renderImagePreviews();
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            }
+        });
+
+        function renderImagePreviews() {
+            const container = document.getElementById('ai-chat-preview-container');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            if (attachedImages.length > 0) {
+                container.classList.remove('hidden');
+                attachedImages.forEach((img, index) => {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'relative inline-block mr-2';
+                    wrapper.innerHTML = `
+                        <img src="${img}" class="h-16 w-16 object-cover border rounded shadow-sm">
+                        <button class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 text-xs flex items-center justify-center font-bold hover:bg-red-600 shadow" data-index="${index}">×</button>
+                    `;
+                    wrapper.querySelector('button').addEventListener('click', (e) => {
+                        const idx = parseInt(e.target.getAttribute('data-index'));
+                        attachedImages.splice(idx, 1);
+                        renderImagePreviews();
+                    });
+                    container.appendChild(wrapper);
+                });
+            } else {
+                container.classList.add('hidden');
+            }
+        }
+
         btnAiSend.addEventListener('click', async () => {
             if (isAiSending) {
                 // すでに送信中の場合は「停止（中断）」として機能する
@@ -2897,7 +3058,11 @@ function setupMiscEvents() {
             }
 
             session.messages = session.messages || [];
-            session.messages.push({ role: 'user', content: displayContent });
+            session.messages.push({ 
+                role: 'user', 
+                content: displayContent,
+                images: [...attachedImages] // 添付画像を履歴用に保存
+            });
             
             // 初回送信時にタイトル自動生成（簡易）
             if (session.messages.length === 1) {
@@ -2905,9 +3070,11 @@ function setupMiscEvents() {
                 aiPanelTitle.textContent = session.title;
             }
 
-            // 送信用メッセージ履歴をディープコピーして、直近のメッセージだけ添付データ付きにする
-            let sendMessages = JSON.parse(JSON.stringify(session.messages));
-            sendMessages[sendMessages.length - 1].content = sendContent;
+            // 送信用メッセージ履歴をディープコピーして、会話メッセージ（user/assistant）のみにフィルタリング
+            let sendMessages = JSON.parse(JSON.stringify(session.messages.filter(m => m.role === 'user' || m.role === 'assistant')));
+            if (sendMessages.length > 0) {
+                sendMessages[sendMessages.length - 1].content = sendContent;
+            }
 
             // 💸 お財布大爆発防止ブレーキ（トークン節約機能）
             if (sendMessages.length > 6) {
@@ -2919,74 +3086,18 @@ function setupMiscEvents() {
             sysPrompt += getContextTextForSession(session);
 
             // 【常時追加されるシステムコアプロンプト】
-            // ガントチャートのリアルタイムプレビューを確実に動作させ、複数キャラクター間のリソース平準化を成功させるための命令
+            // ガントチャートのリアルタイムプレビュー等の複雑なパズルは行わず、俯瞰的な質疑応答のみを行う
             sysPrompt += `
-
-【超重要指示 - WBS制御システム制約ルール（絶対厳守）】
-1. ユーザーからスケジュールの調整、平準化、延期、再構築を求められた場合、日本語での分かりやすい解説とともに、変更後のスケジュールデータを以下のJSONコードブロック（ \`\`\`json ... \`\`\` ）で必ず返答に含めて出力してください。
-
-[出力JSON形式]
-\`\`\`json
-[
-  {
-    "id": "タスクID（例: TSK_00001）",
-    "start": "新しい開始日（YYYY-MM-DD）",
-    "end": "新しい終了日（YYYY-MM-DD）"
-  }
-]
-\`\`\`
-
-2. 【絶対厳守の物理制約（1つでも破る提案は完全に無効・NGとなります）】
-- 【制約A: 先行・後続タスクの順序厳守】
-  各タスクデータの "dep" (先行タスクID) が空欄ではない場合、その後続タスクの開始日 (start) は、必ず "dep" に指定されているすべての先行タスクの終了日 (end) の「翌日以降」に配置してください。絶対に先行タスクの期間と被ったり、先行タスクが終わる前に開始してはなりません。
-- 【制約B: アート締め（art_deadline）の限界厳守】
-  バージョン情報内の「アート締め（art_deadline）」の日付を超えてスケジュールを組むことは、どのような理由があっても「絶対に禁止」です。すべてのタスクの終了日 (end) は、必ず所属するバージョンの art_deadline の日付以前（当日含む）に収めてください。これを超える提案はプログラム上でクラッシュします。
-- 【制約C: セクション締め（deadline_date）の限界厳守】
-  キャラクター・セクションごとに設定されている「セクション締め（deadline_date）」の日付以前（当日含む）に、該当セクション内の全タスクが完了するようにスケジュールを収めてください。
-
-3. 【複数グループ（キャラクター）をまたいだリソース平準化（Leveling）のルール】
-WBS全体で同一の担当者（member_id）のスケジュールに「タスク期間の重複（被り）」が発生している場合、複数のキャラクター（子グループ）やバージョン（リリース）をまたいで、それらのタスクが「絶対に重複（並行作業）しない」ように、パズルのように直列に平準化（スライド）させてください。
-- 同一担当者のタスク同士を日付順に直列にソートし、前の作業が終わった「翌日（または数日後）」に次の作業を開始するように直列化して押し出してください。
-- 押し出す際、上記の「制約A（先行後続順序）」「制約B（アート締め限界）」「制約C（セクション締め限界）」をすべて同時に満たすようにパズルしてください。
-- 対象期間における全担当者の重複（被り）状況は、上のコンテキストテキストの「タスク期間の重複状況」に詳しくリストアップされています。これをもとに、被りが完全に「0件」になるようにパズルしてください。
+【指示】
+あなたはプロジェクト管理のAIアシスタントです。
+上記のプロジェクト情報（タスクリスト、担当者、マスターデータなど）を俯瞰的に分析し、ユーザーの質問に対して的確で分かりやすいアドバイスや回答を提供してください。
+スケジュールを直接修正するためのJSONコードなどは出力する必要はありません。テキストで回答してください。
 `;
-
-            if (currentAiMode === 'operator') {
-                sysPrompt += `
-【超重要指示 - オペレーターモード】
-マスターデータの変更が必要な場合、あなたは会話の返答の最後に「必ず」以下のJSONフォーマットをコードブロック（ \`\`\`json ... \`\`\` ）で出力してください。
-日本語の解説は、コードブロックの手前に記載してください。
-
-JSONフォーマット:
-\`\`\`json
-{
-  "action": "update_masters",
-  "data": {
-    "character": [ ...キャラクターマスタ(m_character.csv)の現在の最新全レコード... ],
-    "member": [ ...メンバーマスタ(m_member.csv)の現在の最新全レコード... ],
-    "release": [ ...リリース（バージョン）マスタ(m_release.csv)の現在の最新全レコード... ],
-    "section": [ ...セクションマスタ(m_section.csv)の現在の最新全レコード... ],
-    "task_template": [ ...タスクテンプレート(m_task_template.csv)の現在の最新全レコード... ]
-  }
-}
-\`\`\`
-※変更されたレコードだけでなく、「すべての」レコードを含めた新しい配列を返してください。既存のデータを誤って削除しないように注意し、追加または更新してください。
-現在のマスタ状態は、上のプロジェクトコンテキスト内の「マスターデータ」を参照してください。
-`;
-            }
-
-            // トークンサイズの概算（1文字あたり約0.65トークンで見積もり）
-            const estimatedInputTokens = Math.ceil((sysPrompt.length + JSON.stringify(sendMessages).length) * 0.65);
 
             // プロセス表示タイマー
             let processTimer = null;
-            const processSteps = [
-                { id: 1, textDesc: "対象期間タスク＆マスターデータの抽出・整形", status: 'active', time: 0 },
-                { id: 2, textDesc: "システムプロンプト＆コンテキスト結合（送信準備）", status: 'pending', time: 0 },
-                { id: 3, textDesc: "AIサーバー接続・スケジュールパズル計算中", status: 'pending', time: 0 },
-                { id: 4, textDesc: "各締め切りと先行後続（矢印）の整合性を検証中", status: 'pending', time: 0 },
-                { id: 5, textDesc: "提案データをフォーマット中。まもなく仮反映されます...", status: 'pending', time: 0 }
-            ];
+            const p1 = { role: 'process', stepId: 1, textDesc: "AIが回答を生成中...", status: 'active', time: '0.0', details: null, tokens: null };
+            session.messages.push(p1);
 
             aiChatInput.value = '';
             
@@ -3000,131 +3111,17 @@ JSONフォーマット:
             currentAbortController = new AbortController();
 
             const startTime = Date.now();
-            let currentStepIndex = 0;
 
             processTimer = setInterval(() => {
                 const now = Date.now();
                 const elapsedSinceStart = now - startTime;
-                
-                // 現在アクティブなステップの経過秒数を更新（ストップウォッチ）
-                processSteps[currentStepIndex].time = (elapsedSinceStart / 1000).toFixed(1);
-                
-                // 特定の経過時間または特定の状態に応じて自動的に次のステップへ遷移
-                if (currentStepIndex === 0 && elapsedSinceStart >= 1000) {
-                    processSteps[currentStepIndex].status = 'done';
-                    currentStepIndex = 1;
-                    processSteps[currentStepIndex].status = 'active';
-                } else if (currentStepIndex === 1 && elapsedSinceStart >= 2500) {
-                    processSteps[currentStepIndex].status = 'done';
-                    currentStepIndex = 2;
-                    processSteps[currentStepIndex].status = 'active';
-                } else if (currentStepIndex === 2 && elapsedSinceStart >= 12000) {
-                    processSteps[currentStepIndex].status = 'done';
-                    currentStepIndex = 3;
-                    processSteps[currentStepIndex].status = 'active';
-                } else if (currentStepIndex === 3 && elapsedSinceStart >= 18000) {
-                    processSteps[currentStepIndex].status = 'done';
-                    currentStepIndex = 4;
-                    processSteps[currentStepIndex].status = 'active';
-                }
-
-                // tempMessages の再構築
-                const renderMessages = [...session.messages];
-                processSteps.forEach(step => {
-                    if (step.status === 'done' || step.status === 'active') {
-                        let tokenText = '';
-                        if (step.id === 1 || step.id === 2) {
-                            tokenText = ` / 送信見積: ~${estimatedInputTokens} tokens`;
-                        }
-                        renderMessages.push({
-                            role: 'process',
-                            content: step.textDesc,
-                            time: `${step.time}s`,
-                            status: step.status,
-                            tokens: tokenText
-                        });
-                    }
-                });
-
-                renderAiChatMessages(renderMessages, false);
+                p1.time = (elapsedSinceStart / 1000).toFixed(1);
+                renderAiChatMessages(session.messages, false);
             }, 100);
 
-            // 送信用メッセージ履歴をディープコピーして、直近のメッセージだけ添付データ付きにする
-            let sendMessages = JSON.parse(JSON.stringify(session.messages));
-            sendMessages[sendMessages.length - 1].content = sendContent;
-
-            // 💸 お財布大爆発防止ブレーキ（トークン節約機能）
-            // 過去ログをすべて送り続けるとリクエストごとに数万トークンを消費してしまうため、
-            // 直近の6メッセージ（会話の往復で最大3往復分）に履歴を制限して送信します。
-            // ※最新のガントのコンテキストは常に最新のシステムプロンプトとして送信されるため、過去履歴を制限しても実用上の精度は一切落ちません。
-            if (sendMessages.length > 6) {
-                sendMessages = sendMessages.slice(-6);
-            }
-
-            // 送信用システムプロンプトの構築
-            let sysPrompt = aiSettings.systemPrompt || 'あなたはプロジェクト管理アシスタントです。';
-            sysPrompt += getContextTextForSession(session);
-
-            // 【常時追加されるシステムコアプロンプト】
-            // ガントチャートのリアルタイムプレビューを確実に動作させ、複数キャラクター間のリソース平準化を成功させるための命令
-            sysPrompt += `
-
-【超重要指示 - WBS制御システム制約ルール（絶対厳守）】
-1. ユーザーからスケジュールの調整、平準化、延期、再構築を求められた場合、日本語での分かりやすい解説とともに、変更後のスケジュールデータを以下のJSONコードブロック（ \`\`\`json ... \`\`\` ）で必ず返答に含めて出力してください。
-
-[出力JSON形式]
-\`\`\`json
-[
-  {
-    "id": "タスクID（例: TSK_00001）",
-    "start": "新しい開始日（YYYY-MM-DD）",
-    "end": "新しい終了日（YYYY-MM-DD）"
-  }
-]
-\`\`\`
-
-2. 【絶対厳守の物理制約（1つでも破る提案は完全に無効・NGとなります）】
-- 【制約A: 先行・後続タスクの順序厳守】
-  各タスクデータの "dep" (先行タスクID) が空欄ではない場合、その後続タスクの開始日 (start) は、必ず "dep" に指定されているすべての先行タスクの終了日 (end) の「翌日以降」に配置してください。絶対に先行タスクの期間と被ったり、先行タスクが終わる前に開始してはなりません。
-- 【制約B: アート締め（art_deadline）の限界厳守】
-  バージョン情報内の「アート締め（art_deadline）」の日付を超えてスケジュールを組むことは、どのような理由があっても「絶対に禁止」です。すべてのタスクの終了日 (end) は、必ず所属するバージョンの art_deadline の日付以前（当日含む）に収めてください。これを超える提案はプログラム上でクラッシュします。
-- 【制約C: セクション締め（deadline_date）の限界厳守】
-  キャラクター・セクションごとに設定されている「セクション締め（deadline_date）」の日付以前（当日含む）に、該当セクション内の全タスクが完了するようにスケジュールを収めてください。
-
-3. 【複数グループ（キャラクター）をまたいだリソース平準化（Leveling）のルール】
-WBS全体で同一の担当者（member_id）のスケジュールに「タスク期間の重複（被り）」が発生している場合、複数のキャラクター（子グループ）やバージョン（リリース）をまたいで、それらのタスクが「絶対に重複（並行作業）しない」ように、パズルのように直列に平準化（スライド）させてください。
-- 同一担当者のタスク同士を日付順に直列にソートし、前の作業が終わった「翌日（または数日後）」に次の作業を開始するように直列化して押し出してください。
-- 押し出す際、上記の「制約A（先行後続順序）」「制約B（アート締め限界）」「制約C（セクション締め限界）」をすべて同時に満たすようにパズルしてください。
-- 対象期間における全担当者の重複（被り）状況は、上のコンテキストテキストの「タスク期間の重複状況」に詳しくリストアップされています。これをもとに、被りが完全に「0件」になるようにパズルしてください。
-`;
-
-            if (currentAiMode === 'operator') {
-                sysPrompt += `
-【超重要指示 - オペレーターモード】
-あなたはユーザーの依頼に基づき、マスターデータの書き換え、追加、編集を自動で行うオペレーターです。
-マスターデータの変更が必要な場合、あなたは会話の返答の最後に「必ず」以下のJSONフォーマットをコードブロック（ \`\`\`json ... \`\`\` ）で出力してください。
-日本語の解説は、コードブロックの手前に記載してください。
-
-JSONフォーマット:
-\`\`\`json
-{
-  "action": "update_masters",
-  "data": {
-    "character": [ ...キャラクターマスタ(m_character.csv)の現在の最新全レコード... ],
-    "member": [ ...メンバーマスタ(m_member.csv)の現在の最新全レコード... ],
-    "release": [ ...リリース（バージョン）マスタ(m_release.csv)の現在の最新全レコード... ],
-    "section": [ ...セクションマスタ(m_section.csv)の現在の最新全レコード... ],
-    "task_template": [ ...タスクテンプレート(m_task_template.csv)の現在の最新全レコード... ]
-  }
-}
-\`\`\`
-※変更されたレコードだけでなく、「すべての」レコードを含めた新しい配列を返してください。既存のデータを誤って削除しないように注意し、追加または更新してください。
-現在のマスタ状態は、上のプロジェクトコンテキスト内の「マスターデータ」を参照してください。
-`;
-            }
-
             try {
-                const res = await fetch('/api/llm/chat', {
+                // --- API Call ---
+                const res1 = await fetch('/api/llm/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -3133,72 +3130,58 @@ JSONフォーマット:
                         model: aiSettings.model,
                         temperature: aiSettings.temperature,
                         systemPrompt: sysPrompt,
-                        messages: sendMessages
+                        messages: sendMessages,
+                        images: attachedImages // ペースト画像を追加
                     }),
-                    signal: currentAbortController.signal // Abortシグナルを設定
+                    signal: currentAbortController.signal
                 });
-                
-                const data = await res.json();
+                const data1 = await res1.json();
+                if (data1.status !== 'success') throw new Error(data1.message);
+
+                let finalTokens = data1.tokens;
+                let finalReply = data1.reply;
+
+                p1.status = 'done';
+                p1.details = '処理完了';
+                p1.tokens = ' / ' + finalTokens + ' tokens';
+
                 const endTime = Date.now();
                 const elapsedSeconds = ((endTime - startTime) / 1000).toFixed(1);
                 const currentTimeStr = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-                if (data.status === 'success') {
-                    session.messages.push({ 
-                        role: 'assistant', 
-                        content: data.reply, 
-                        tokens: data.tokens,
-                        responseTime: elapsedSeconds,
-                        timestamp: currentTimeStr
-                    });
-                    session.totalTokens = (session.totalTokens || 0) + data.tokens;
-                    renderAiChatMessages(session.messages);
+                session.messages.push({ 
+                    role: 'assistant', 
+                    content: finalReply, 
+                    tokens: finalTokens,
+                    responseTime: elapsedSeconds,
+                    timestamp: currentTimeStr
+                });
 
-                    // オペレーターモード時の自動マスタ更新判定
-                    if (currentAiMode === 'operator') {
-                        const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
-                        const match = data.reply.match(jsonRegex);
-                        if (match) {
-                            try {
-                                const parsed = JSON.parse(match[1]);
-                                if (parsed.action === 'update_masters' && parsed.data) {
-                                    await autoUpdateMasters(parsed.data);
-                                }
-                            } catch (err) {
-                                console.error("JSONパースエラー:", err);
-                            }
-                        }
-                    }
+                session.totalTokens = (session.totalTokens || 0) + finalTokens;
+                renderAiChatMessages(session.messages);
 
-                    // 添付リセット
-                    if (btnRemoveAttachment) btnRemoveAttachment.click();
-                } else {
-                    // APIエラー時のインラインエラーカード追加
-                    session.messages.push({ role: 'error', content: `APIエラー: ${data.message}` });
-                    renderAiChatMessages(session.messages, false);
-                }
+                if (btnRemoveAttachment) btnRemoveAttachment.click();
+
             } catch (e) {
                 if (e.name === 'AbortError') {
-                    // ユーザーによって中断された場合
                     session.messages.push({ role: 'error', content: 'ユーザーによって処理が中断されました。' });
                     renderAiChatMessages(session.messages, false);
                 } else {
-                    // 通常の通信エラー時のインラインエラーカード追加
                     session.messages.push({ role: 'error', content: `通信エラー: ${e.message || e}` });
                     renderAiChatMessages(session.messages, false);
                 }
             } finally {
-                if (processTimer) {
-                    clearInterval(processTimer);
-                }
-                // 送信状態を「送信（青）」に戻す
+                if (processTimer) clearInterval(processTimer);
                 isAiSending = false;
                 currentAbortController = null;
                 btnAiSend.textContent = '送信';
                 btnAiSend.classList.remove('bg-red-500', 'hover:bg-red-600');
                 btnAiSend.classList.add('bg-blue-500', 'hover:bg-blue-600');
                 
-                // 保存
+                // 画像添付初期化
+                attachedImages = [];
+                renderImagePreviews();
+
                 sessions[sessionIndex] = session;
                 localStorage.setItem('ai_sessions', JSON.stringify(sessions));
             }
@@ -3283,6 +3266,8 @@ JSONフォーマット:
             aiSessionsView.classList.remove('hidden');
             btnBackToSessions.classList.add('hidden');
             aiPanelTitle.textContent = 'AIセッション';
+            const periodEl = document.getElementById('ai-panel-period');
+            if (periodEl) periodEl.classList.add('hidden');
             
             // 戻る際にも仮プレビュー状態（バックアップ）があれば復元し、プレビューバーを非表示にする
             if (allTasksRawBackup) {
@@ -3313,6 +3298,40 @@ JSONフォーマット:
         });
     }
 
+    // チャットパネルのリサイズ処理
+    const resizeHandle = document.getElementById('ai-chat-resize-handle');
+    if (aiChatPanel && resizeHandle) {
+        let isResizing = false;
+        let startX, startWidth;
+        
+        resizeHandle.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = parseInt(document.defaultView.getComputedStyle(aiChatPanel).width, 10);
+            
+            // リサイズ中に一時的にトランジションを無効にして追従性を上げる
+            aiChatPanel.classList.remove('transition-transform', 'duration-300');
+            
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+            e.preventDefault();
+        });
+        
+        function handleMouseMove(e) {
+            if (!isResizing) return;
+            const dx = startX - e.clientX;
+            const newWidth = Math.max(300, Math.min(window.innerWidth - 100, startWidth + dx));
+            aiChatPanel.style.width = `${newWidth}px`;
+        }
+        
+        function handleMouseUp() {
+            isResizing = false;
+            aiChatPanel.classList.add('transition-transform', 'duration-300');
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        }
+    }
+
     // 設定モーダルの開閉と初期値ロード
     if (btnAiSettings) {
         btnAiSettings.addEventListener('click', () => {
@@ -3327,6 +3346,7 @@ JSONフォーマット:
                 aiTempVal.textContent = settings.temperature;
             }
             if (settings.systemPrompt) aiSystemPrompt.value = settings.systemPrompt;
+            if (settings.maxRetries !== undefined) document.getElementById('ai-max-retries').value = settings.maxRetries;
             
             // プロバイダ変更時のUI切り替え
             aiProvider.dispatchEvent(new Event('change'));
@@ -3433,7 +3453,8 @@ JSONフォーマット:
                 apiKey: aiApiKey.value,
                 model: model,
                 temperature: parseFloat(aiTemperature.value),
-                systemPrompt: aiSystemPrompt.value
+                systemPrompt: aiSystemPrompt.value,
+                maxRetries: parseInt(document.getElementById('ai-max-retries').value || 3)
             };
             localStorage.setItem('ai_settings', JSON.stringify(settings));
             aiSettingsDialog.classList.add('hidden');
@@ -3526,13 +3547,23 @@ JSONフォーマット:
     if (filterMemberSearch) {
         filterMemberSearch.addEventListener('input', (e) => {
             const term = e.target.value.trim().toLowerCase();
-            document.querySelectorAll('.member-filter-item').forEach(item => {
-                const cb = item.querySelector('.member-filter-cb');
-                const name = cb.getAttribute('data-name').toLowerCase();
-                if (name.includes(term)) {
-                    item.style.display = '';
+            document.querySelectorAll('.member-filter-section-group').forEach(group => {
+                let hasVisibleChild = false;
+                group.querySelectorAll('.member-filter-item').forEach(item => {
+                    const cb = item.querySelector('.member-filter-cb');
+                    const name = cb.getAttribute('data-name').toLowerCase();
+                    if (name.includes(term)) {
+                        item.style.display = '';
+                        hasVisibleChild = true;
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+                
+                if (term === '' || hasVisibleChild) {
+                    group.style.display = '';
                 } else {
-                    item.style.display = 'none';
+                    group.style.display = 'none';
                 }
             });
         });
