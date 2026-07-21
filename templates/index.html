@@ -56,13 +56,14 @@
 
     <!-- Tab & Control Bar (Tabs and Filters integrated) -->
     <div class="bg-gray-200 border-b flex items-center justify-between px-3 py-1.5 select-none z-30" id="tabs-control-bar">
-        <!-- 左側：タブ + 検索フィルター群（仕切りあり） -->
+        <!-- 左側：フィルター群（仕切りあり） -->
         <div class="flex items-center space-x-3">
-            <!-- 検索 & フィルター -->
             <div class="flex items-center space-x-3 text-xs">
+                <span class="text-gray-600 font-bold ml-1">🔍 絞り込み:</span>
+                
                 <!-- 検索 -->
                 <div class="flex items-center space-x-1 bg-white px-2 py-1 rounded border shadow-sm">
-                    <span class="text-gray-400 text-xs">🔍</span>
+                    <span class="text-gray-400 text-xs">🏷️</span>
                     <input type="text" id="filter-text" class="text-black border-none focus:outline-none w-36 text-xs" placeholder="タスク・キャラ名">
                 </div>
                 
@@ -100,11 +101,17 @@
                     </div>
                 </div>
 
+                <!-- セパレータ -->
+                <div class="h-6 border-l border-gray-400 mx-1"></div>
+
                 <!-- イナズマ線 -->
                 <div class="flex items-center bg-white px-2 py-1 rounded border shadow-sm text-xs">
                     <input type="checkbox" id="toggle-progress-line" class="mr-1 w-3.5 h-3.5 rounded cursor-pointer">
                     <label for="toggle-progress-line" class="text-xs text-gray-700 cursor-pointer flex items-center font-semibold">⚡イナズマ線</label>
                 </div>
+
+                <!-- セパレータ -->
+                <div class="h-6 border-l border-gray-400 mx-1"></div>
 
                 <!-- 取り消し・やり直し（矢印アイコン化） -->
                 <div class="flex items-center space-x-1 text-xs">

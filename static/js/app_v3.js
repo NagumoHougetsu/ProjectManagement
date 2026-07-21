@@ -1119,7 +1119,8 @@ function renderHeaderAndGrid(totalWidth) {
     bottomHtml += '</div>';
     heatmapHtml += '</div>';
     
-    els.ganttHeaderContent.innerHTML = yearHtml + monthHtml + bottomHtml + heatmapHtml;
+    els.ganttHeaderContent.innerHTML = yearHtml + monthHtml + bottomHtml + heatmapHtml +
+        `<div id="gantt-header-crosshair" class="absolute top-0 bottom-0 bg-blue-500 opacity-20 pointer-events-none hidden" style="z-index: 50;"></div>`;
     els.ganttGrid.innerHTML = gridHtml;
 }
 
@@ -1340,7 +1341,7 @@ function renderTasks() {
             // 縦線 (レーン部分を貫く)
             html += `
                 <div class="absolute gantt-deadline-line" data-section-id="${sec.section_id}" data-date="${dateStr}"
-                     style="left:${x}px; top:${charY + charRowHeight}px; width:4px; height:${totalLanesHeight}px; background-color:${color}; opacity: 0.6; z-index: 10;"></div>
+                     style="left:${x}px; top:${charY + charRowHeight}px; width:4px; height:${totalLanesHeight}px; background-color:${color}; filter: brightness(0.7) saturate(1.5); opacity: 0.8; z-index: 10;"></div>
             `;
             
             // ▼マーカー（ドラッグ可能）
@@ -1350,7 +1351,7 @@ function renderTasks() {
             html += `
                 <div class="absolute gantt-deadline-marker cursor-pointer flex flex-col items-center justify-center select-none"
                      data-release-id="${g.parentId}" data-char-id="${g.raw.char_id}" data-section-id="${sec.section_id}" data-date="${dateStr}"
-                     style="left:${x - 6}px; top:${markerTop}px; width:16px; height:16px; z-index:25; color:${color}; font-size:16px; text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff;">
+                     style="left:${x - 6}px; top:${markerTop}px; width:16px; height:16px; z-index:25; color:${color}; filter: brightness(0.7) saturate(1.5); font-size:16px; text-shadow: 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff;">
                     ▼
                 </div>
             `;
@@ -1367,17 +1368,21 @@ function renderDependencyLines() {
     // SVG内部をクリア
     svg.innerHTML = '';
     
-    // 矢印マーカー（Defs）の追加
-    let defs = svg.querySelector('defs');
-    if (!defs) {
-        defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-        defs.innerHTML = `
-            <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#3b82f6" />
-            </marker>
-        `;
-        svg.appendChild(defs);
-    }
+    // 依存関係の色ごとにマーカーを動的に生成するためのDef
+    const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+    svg.appendChild(defs);
+
+    // デフォルトのマーカー（プレビュー用など）
+    const defaultMarker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+    defaultMarker.setAttribute("id", "arrow-default");
+    defaultMarker.setAttribute("viewBox", "0 0 10 10");
+    defaultMarker.setAttribute("refX", "6");
+    defaultMarker.setAttribute("refY", "5");
+    defaultMarker.setAttribute("markerWidth", "6");
+    defaultMarker.setAttribute("markerHeight", "6");
+    defaultMarker.setAttribute("orient", "auto-start-reverse");
+    defaultMarker.innerHTML = `<path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#ef4444" />`;
+    defs.appendChild(defaultMarker);
 
     // タスク要素の位置をマッピング
     const taskItems = document.querySelectorAll('.gantt-task-item');
@@ -1404,8 +1409,12 @@ function renderDependencyLines() {
             const fromCoord = taskCoords[depId];
             const toCoord = taskCoords[t.task_id];
             if (fromCoord && toCoord) {
+                // 後続タスクのセクションカラーを線の色にする
+                const section = getMasterItem('section', 'section_id', t.section_id);
+                const color = section ? section.color : '#3b82f6';
+                
                 // 先行タスクの右端 -> 後続タスクの左端
-                drawDependencyPath(svg, fromCoord.right, toCoord.left, depId, t.task_id);
+                drawDependencyPath(svg, fromCoord.right, toCoord.left, depId, t.task_id, false, color);
             }
         });
     });
@@ -1419,9 +1428,33 @@ function renderDependencyLines() {
     }
 }
 
-function drawDependencyPath(svg, p1, p2, fromId, toId, isPreview = false) {
+function drawDependencyPath(svg, p1, p2, fromId, toId, isPreview = false, customColor = null) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    const strokeColor = isPreview ? "#ef4444" : (customColor || "#3b82f6");
     
+    let markerId = "arrow-default";
+    if (!isPreview && customColor) {
+        // 色ごとに固有のマーカーIDを作成（#を除去）
+        const colorId = customColor.replace('#', '');
+        markerId = `arrow-${colorId}`;
+        
+        // まだその色のマーカーがなければ作成
+        let defs = svg.querySelector('defs');
+        if (defs && !defs.querySelector(`#${markerId}`)) {
+            const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+            marker.setAttribute("id", markerId);
+            marker.setAttribute("viewBox", "0 0 10 10");
+            marker.setAttribute("refX", "6");
+            marker.setAttribute("refY", "5");
+            marker.setAttribute("markerWidth", "6");
+            marker.setAttribute("markerHeight", "6");
+            marker.setAttribute("orient", "auto-start-reverse");
+            // 線と同じ明るさ調整をマーカーにも適用
+            marker.innerHTML = `<path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="${customColor}" style="filter: brightness(0.8);" />`;
+            defs.appendChild(marker);
+        }
+    }
+
     // コントロールポイントの計算（なだらかなベジェ曲線）
     const dx = Math.abs(p2.x - p1.x);
     const cx1 = p1.x + Math.min(dx * 0.4, 40);
@@ -1433,15 +1466,19 @@ function drawDependencyPath(svg, p1, p2, fromId, toId, isPreview = false) {
     
     path.setAttribute("d", d);
     if (isPreview) {
-        path.setAttribute("stroke", "#ef4444"); // ドラッグ中は赤色破線
+        path.setAttribute("stroke", strokeColor); // ドラッグ中は赤色破線
         path.setAttribute("stroke-width", "2");
         path.setAttribute("stroke-dasharray", "4,4");
     } else {
-        path.setAttribute("stroke", "#3b82f6"); // 通常は青色
+        path.setAttribute("stroke", strokeColor);
         path.setAttribute("stroke-width", "2");
+        // 色を少し暗くして視認性を上げる（オプション：必要なら filter: brightness(0.8) を追加）
+        path.style.filter = "brightness(0.8)";
     }
     path.setAttribute("fill", "none");
-    path.setAttribute("marker-end", "url(#arrow)");
+    
+    // 矢印の色も線に合わせる
+    path.setAttribute("marker-end", `url(#${markerId})`);
     
     if (!isPreview) {
         path.setAttribute("class", "gantt-dependency-line pointer-events-auto cursor-pointer hover:stroke-red-500 hover:stroke-[3px] transition-colors duration-150");
@@ -1720,6 +1757,8 @@ function setupMouseTracking() {
         if (mouseX < 0 || mouseY < 0) {
             els.crosshairCol.classList.add('hidden');
             els.crosshairRow.classList.add('hidden');
+            const headerCrosshair = document.getElementById('gantt-header-crosshair');
+            if (headerCrosshair) headerCrosshair.classList.add('hidden');
             if (els.taskTooltip) els.taskTooltip.classList.add('hidden');
             return;
         }
@@ -1730,6 +1769,13 @@ function setupMouseTracking() {
         els.crosshairCol.style.left = `${dayLeftX}px`;
         els.crosshairCol.style.width = `${ganttConfig.dayWidth}px`;
         els.crosshairCol.classList.remove('hidden');
+
+        const headerCrosshair = document.getElementById('gantt-header-crosshair');
+        if (headerCrosshair) {
+            headerCrosshair.style.left = `${dayLeftX}px`;
+            headerCrosshair.style.width = `${ganttConfig.dayWidth}px`;
+            headerCrosshair.classList.remove('hidden');
+        }
         
         const rowIndex = Math.floor(mouseY / ganttConfig.rowHeight);
         const rowTop = rowIndex * ganttConfig.rowHeight;
@@ -1811,6 +1857,8 @@ function setupMouseTracking() {
         if (dragState.isDragging || panState.isPanning) return;
         els.crosshairCol.classList.add('hidden');
         els.crosshairRow.classList.add('hidden');
+        const headerCrosshair = document.getElementById('gantt-header-crosshair');
+        if (headerCrosshair) headerCrosshair.classList.add('hidden');
         if (els.taskTooltip) els.taskTooltip.classList.add('hidden');
     });
 
