@@ -179,6 +179,7 @@ let currentHoverGroup = null;
 let dependencyDragSourceId = null;
 let dependencyDragCurrentPos = null;
 let insertTargetIndex = -1; // 新規タスク挿入位置
+let lastHoveredTaskId = null; // 強調表示用
 
 // --- Initialization ---
 async function init() {
@@ -1217,7 +1218,7 @@ function renderTasks() {
             <div class="gantt-task-item ${completedClass} ${selectedClass}" data-task-id="${t.task_id}" style="left:${x}px; top:${taskTop}px; width:${width}px; height:${taskHeight}px; z-index:20;">
                 <div class="gantt-task-bg" style="background-color:${bgColor};"></div>
                 <div class="gantt-task-progress" style="width:${progress}%; background-color:${bgColor};"></div>
-                <div class="absolute top-0 left-0 w-full z-10" style="height: 4px; background-color:${statusColor}; border-radius: 2px 2px 0 0;"></div>
+                <div class="gantt-status-bar absolute top-0 left-0 w-full z-10" style="height: 4px; background-color:${statusColor}; border-radius: 2px 2px 0 0;"></div>
                 <div class="gantt-member-badge" style="background-color:${memberBg}; color:${memberText};">${memberName}</div>
                 <div class="gantt-task-name" style="color: ${textColor};">${t.task_name}</div>
                 <div class="gantt-resize-handle gantt-resize-handle-left" data-action="resize-left"></div>
@@ -1401,20 +1402,55 @@ function renderDependencyLines() {
         };
     });
 
+    // 1. 各タスクの入出力本数をカウント
+    const incomingCountMap = {};
+    const outgoingCountMap = {};
+    currentFilteredTasks.forEach(t => {
+        if (!t.dependencies) return;
+        const depIds = t.dependencies.split(/[,;]/).map(s => s.trim()).filter(s => s);
+        incomingCountMap[t.task_id] = depIds.length;
+        depIds.forEach(depId => {
+            outgoingCountMap[depId] = (outgoingCountMap[depId] || 0) + 1;
+        });
+    });
+
+    // 2. 現在何本目の線を描画しているかを追跡するカウンター
+    const incomingCounter = {};
+    const outgoingCounter = {};
+
     // 既存の依存関係線を描画
     currentFilteredTasks.forEach(t => {
         if (!t.dependencies) return;
         const depIds = t.dependencies.split(/[,;]/).map(s => s.trim()).filter(s => s);
+        
         depIds.forEach(depId => {
             const fromCoord = taskCoords[depId];
             const toCoord = taskCoords[t.task_id];
+            
             if (fromCoord && toCoord) {
+                const inCount = incomingCountMap[t.task_id] || 1;
+                const outCount = outgoingCountMap[depId] || 1;
+                const inIdx = incomingCounter[t.task_id] || 0;
+                const outIdx = outgoingCounter[depId] || 0;
+
+                // 複数の線が重ならないようにy座標を少しずらす
+                const spacing = 6;
+                const offsetInY = inCount > 1 ? (inIdx - (inCount - 1) / 2) * spacing : 0;
+                const offsetOutY = outCount > 1 ? (outIdx - (outCount - 1) / 2) * spacing : 0;
+
+                const p1 = { x: fromCoord.right.x, y: fromCoord.right.y + offsetOutY };
+                const p2 = { x: toCoord.left.x, y: toCoord.left.y + offsetInY };
+
                 // 後続タスクのセクションカラーを線の色にする
                 const section = getMasterItem('section', 'section_id', t.section_id);
                 const color = section ? section.color : '#3b82f6';
                 
                 // 先行タスクの右端 -> 後続タスクの左端
-                drawDependencyPath(svg, fromCoord.right, toCoord.left, depId, t.task_id, false, color);
+                drawDependencyPath(svg, p1, p2, depId, t.task_id, false, color);
+
+                // カウンターを更新
+                incomingCounter[t.task_id] = inIdx + 1;
+                outgoingCounter[depId] = outIdx + 1;
             }
         });
     });
@@ -1423,7 +1459,14 @@ function renderDependencyLines() {
     if (dependencyDragSourceId && dependencyDragCurrentPos) {
         const fromCoord = taskCoords[dependencyDragSourceId];
         if (fromCoord) {
-            drawDependencyPath(svg, fromCoord.right, dependencyDragCurrentPos, dependencyDragSourceId, null, true);
+            // ドラッグ中の線もオフセットを考慮
+            const outCount = (outgoingCountMap[dependencyDragSourceId] || 0) + 1;
+            const outIdx = outgoingCounter[dependencyDragSourceId] || 0;
+            const spacing = 6;
+            const offsetOutY = outCount > 1 ? (outIdx - (outCount - 1) / 2) * spacing : 0;
+            
+            const p1 = { x: fromCoord.right.x, y: fromCoord.right.y + offsetOutY };
+            drawDependencyPath(svg, p1, dependencyDragCurrentPos, dependencyDragSourceId, null, true);
         }
     }
 }
@@ -1455,14 +1498,30 @@ function drawDependencyPath(svg, p1, p2, fromId, toId, isPreview = false, custom
         }
     }
 
-    // コントロールポイントの計算（なだらかなベジェ曲線）
-    const dx = Math.abs(p2.x - p1.x);
-    const cx1 = p1.x + Math.min(dx * 0.4, 40);
-    const cy1 = p1.y;
-    const cx2 = p2.x - Math.min(dx * 0.4, 40);
-    const cy2 = p2.y;
-    
-    const d = `M ${p1.x} ${p1.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${p2.x} ${p2.y}`;
+    // コントロールポイントの計算（直角・角丸のクランク状パス）
+    const midX = (p1.x + p2.x) / 2;
+    const radius = 10; // 角の丸み半径
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const xDir = dx >= 0 ? 1 : -1;
+    const yDir = dy >= 0 ? 1 : -1;
+
+    // 半径を距離に応じて調整（崩れないように）
+    const actualRadius = Math.min(radius, Math.abs(dx) / 2, Math.abs(dy) / 2);
+
+    let d;
+    if (actualRadius < 1) {
+        // 距離が極端に短い場合は単純な直線
+        d = `M ${p1.x} ${p1.y} H ${midX} V ${p2.y} H ${p2.x}`;
+    } else {
+        // 角を丸くした階段状
+        d = `M ${p1.x} ${p1.y} ` +
+            `H ${midX - xDir * actualRadius} ` +
+            `Q ${midX} ${p1.y} ${midX} ${p1.y + yDir * actualRadius} ` +
+            `V ${p2.y - yDir * actualRadius} ` +
+            `Q ${midX} ${p2.y} ${midX + xDir * actualRadius} ${p2.y} ` +
+            `H ${p2.x}`;
+    }
     
     path.setAttribute("d", d);
     if (isPreview) {
@@ -1498,6 +1557,43 @@ function drawDependencyPath(svg, p1, p2, fromId, toId, isPreview = false, custom
     }
     
     svg.appendChild(path);
+}
+
+/**
+ * 指定したタスクに関連する依存関係線を強調表示し、それ以外を薄くする
+ */
+function highlightDependencies(taskId) {
+    const allLines = document.querySelectorAll('.gantt-dependency-line');
+    if (!taskId) {
+        // リセット
+        allLines.forEach(line => {
+            line.style.opacity = '1';
+            line.style.strokeWidth = '2';
+            line.style.filter = 'brightness(0.8)';
+            line.classList.remove('highlighted-line');
+        });
+        return;
+    }
+
+    allLines.forEach(line => {
+        const fromId = line.getAttribute('data-from');
+        const toId = line.getAttribute('data-to');
+        if (fromId === taskId || toId === taskId) {
+            // 関連する線
+            line.style.opacity = '1';
+            line.style.strokeWidth = '3';
+            line.style.filter = 'brightness(1.1) saturate(1.2)';
+            line.classList.add('highlighted-line');
+            // 最前面に持ってくる
+            line.parentElement.appendChild(line);
+        } else {
+            // 関連しない線
+            line.style.opacity = '0.15';
+            line.style.strokeWidth = '1.5';
+            line.style.filter = 'grayscale(50%) brightness(0.9)';
+            line.classList.remove('highlighted-line');
+        }
+    });
 }
 
 function renderProgressLine() {
@@ -1796,6 +1892,13 @@ function setupMouseTracking() {
         const hoveredTask = e.target.closest('.gantt-task-item');
         const hoveredMarker = e.target.closest('.gantt-deadline-marker');
         const hoveredLine = e.target.closest('.gantt-deadline-line');
+
+        // タスクホバー時の依存関係強調表示
+        const hoveredTaskId = hoveredTask ? hoveredTask.getAttribute('data-task-id') : null;
+        if (hoveredTaskId !== lastHoveredTaskId) {
+            highlightDependencies(hoveredTaskId);
+            lastHoveredTaskId = hoveredTaskId;
+        }
         
         if (hoveredTask && els.taskTooltip) {
             const taskId = hoveredTask.getAttribute('data-task-id');
@@ -1860,6 +1963,8 @@ function setupMouseTracking() {
         const headerCrosshair = document.getElementById('gantt-header-crosshair');
         if (headerCrosshair) headerCrosshair.classList.add('hidden');
         if (els.taskTooltip) els.taskTooltip.classList.add('hidden');
+        highlightDependencies(null);
+        lastHoveredTaskId = null;
     });
 
     els.ganttTasks.addEventListener('mousedown', (e) => {

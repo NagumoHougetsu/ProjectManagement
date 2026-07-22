@@ -72,13 +72,25 @@ body, html {
     overflow: hidden;
     user-select: none;
     z-index: 20;
+    background-color: #ccc; /* 明度を下げて、より落ち着いた印象に */
 }
 .gantt-task-item.selected {
     box-shadow: 0 0 0 3px #fbbf24;
 }
 .gantt-task-item.completed {
-    opacity: 0.6;
+    background-color: rgba(224, 224, 224, 0.15); /* 本体背景を極限まで半透明に */
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1); /* 影も薄く */
 }
+.gantt-task-item.completed .gantt-task-bg {
+    opacity: 0.05; /* 完了タスクのセクション色背景はほぼ透明 */
+}
+.gantt-task-item.completed .gantt-task-progress,
+.gantt-task-item.completed .gantt-member-badge,
+.gantt-task-item.completed .gantt-task-name,
+.gantt-task-item.completed .gantt-dependency-connector {
+    opacity: 0.15; /* 文字や進捗バー、コネクタは15%の薄さに */
+}
+/* ステータスバー (.gantt-status-bar) は指定がないため 1.0 (不透明) が維持される */
 
 /* タスク内の担当者バッジ */
 .gantt-member-badge {
@@ -121,7 +133,7 @@ body, html {
     left: 0;
     width: 100%;
     height: 100%;
-    opacity: 0.4;
+    opacity: 0.2; /* さらに落として、下地のグレーを活かす */
     z-index: 0;
 }
 .gantt-task-progress {
